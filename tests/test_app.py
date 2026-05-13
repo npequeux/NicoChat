@@ -84,6 +84,11 @@ class TestIndexRoute(unittest.TestCase):
             resp = self.client.get("/")
             self.assertIn(b"llama3:latest", resp.data)
 
+    def test_index_includes_model_selection_help(self):
+        with patch.object(self.app_module, "get_ollama_models", return_value=["llama3:latest"]):
+            resp = self.client.get("/")
+            self.assertIn(b"Choose a model from the Ollama list above.", resp.data)
+
     def test_index_shows_no_models_when_empty(self):
         with patch.object(self.app_module, "get_ollama_models", return_value=[]):
             resp = self.client.get("/")
