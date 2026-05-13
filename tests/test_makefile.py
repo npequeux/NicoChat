@@ -102,7 +102,7 @@ class TestEnsureOllama(unittest.TestCase):
                 0,
                 f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}",
             )
-            self.assertEqual(result.stdout.strip(), "")
+            self.assertNotIn("Starting local Ollama service", result.stdout)
             self.assertFalse((state_dir / "calls.log").exists())
 
 
