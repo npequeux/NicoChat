@@ -62,4 +62,4 @@ ensure-ollama:
 		fi; \
 		sleep 1; \
 	done; \
-	echo "Warning: Ollama did not become ready yet. NicoChat will continue starting. PID: $$ollama_pid"
+	echo "Warning: Ollama did not become ready within 10 seconds. NicoChat will continue starting; check $$log_path or start Ollama manually. PID: $$ollama_pid"
