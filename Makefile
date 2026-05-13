@@ -3,6 +3,7 @@ PORT ?= 5000
 OLLAMA_URL ?= http://127.0.0.1:11434
 OLLAMA_LOG_PATH ?=
 OLLAMA_PID_PATH ?=
+OLLAMA_READY_TIMEOUT ?= 10
 
 .PHONY: build run ensure-ollama
 
@@ -55,11 +56,13 @@ ensure-ollama:
 	nohup env OLLAMA_HOST="$$host_env" ollama serve >"$$log_path" 2>&1 & \
 	ollama_pid="$$!"; \
 	printf '%s\n' "$$ollama_pid" >"$$pid_path"; \
-	for attempt in 1 2 3 4 5 6 7 8 9 10; do \
+	attempt=1; \
+	while [ "$$attempt" -le "$(OLLAMA_READY_TIMEOUT)" ]; do \
 		if env OLLAMA_HOST="$$host_env" ollama list >/dev/null 2>&1; then \
 			echo "Ollama is ready."; \
 			exit 0; \
 		fi; \
 		sleep 1; \
+		attempt=$$((attempt + 1)); \
 	done; \
-	echo "Warning: Ollama did not become ready within 10 seconds. NicoChat will continue starting; check $$log_path or start Ollama manually. PID: $$ollama_pid"
+	echo "Warning: Ollama did not become ready within $(OLLAMA_READY_TIMEOUT) seconds. NicoChat will continue starting; check $$log_path or start Ollama manually. PID: $$ollama_pid"
