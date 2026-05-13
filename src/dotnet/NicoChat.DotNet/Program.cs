@@ -60,7 +60,7 @@ sealed class ChatGateway(HttpClient httpClient)
     private readonly bool _useMock = bool.TryParse(Environment.GetEnvironmentVariable("NICOCHAT_USE_MOCK"), out var useMock) && useMock;
 
     public string Backend => ".NET";
-    public string Model { get; } = Environment.GetEnvironmentVariable("OLLAMA_MODEL") ?? "llama3.2:1b";
+    public string Model { get; } = Environment.GetEnvironmentVariable("OLLAMA_MODEL") ?? "qwen3";
     public string Mode => _useMock ? "mock" : "ollama";
 
     public async Task<string> GetReplyAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken)
