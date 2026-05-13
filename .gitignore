@@ -19,8 +19,20 @@ env/
 .coverage
 htmlcov/
 
-# IDE
-.vscode/
+# .NET
+src/dotnet/NicoChat.DotNet/bin/
+src/dotnet/NicoChat.DotNet/obj/
+
+# Rust
+src/rust/nicochat-rust/target/
+
+# Android
+android/.gradle/
+android/app/build/
+
+# OS / IDE
+.DS_Store
 .idea/
+.vscode/
 *.swp
 *.swo
