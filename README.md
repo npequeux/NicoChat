@@ -47,6 +47,8 @@ make build BACKEND=rust
 make run   BACKEND=rust
 ```
 
+`make run` now attempts to start the local Ollama service automatically when `NICOCHAT_USE_MOCK` is not enabled and the `ollama` CLI is installed.
+
 The UI is then available at:
 
 ```text

@@ -17,6 +17,8 @@ Run one of the following commands from the repository root:
 make run BACKEND=dotnet
 ```
 
+When mock mode is disabled, `make run` first checks whether Ollama is reachable and starts `ollama serve` automatically if needed.
+
 ### Rust backend
 
 ```bash
