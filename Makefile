@@ -1,7 +1,8 @@
 BACKEND ?= dotnet
 PORT ?= 5000
 OLLAMA_URL ?= http://127.0.0.1:11434
-OLLAMA_LOG_PATH ?= /tmp/nicochat-ollama.log
+OLLAMA_LOG_PATH ?=
+OLLAMA_PID_PATH ?=
 
 .PHONY: build run ensure-ollama
 
@@ -41,8 +42,19 @@ ensure-ollama:
 	if env OLLAMA_HOST="$$host_env" ollama list >/dev/null 2>&1; then \
 		exit 0; \
 	fi; \
+	log_path="$(OLLAMA_LOG_PATH)"; \
+	if [ -z "$$log_path" ]; then \
+		log_path="$$(mktemp "$${TMPDIR:-/tmp}/nicochat-ollama.XXXXXX.log")"; \
+	fi; \
+	pid_path="$(OLLAMA_PID_PATH)"; \
+	if [ -z "$$pid_path" ]; then \
+		pid_path="$${log_path%.log}.pid"; \
+	fi; \
 	echo "Starting local Ollama service on $$host_env..."; \
-	nohup env OLLAMA_HOST="$$host_env" ollama serve >"$(OLLAMA_LOG_PATH)" 2>&1 & \
+	echo "Ollama startup log: $$log_path"; \
+	nohup env OLLAMA_HOST="$$host_env" ollama serve >"$$log_path" 2>&1 & \
+	ollama_pid="$$!"; \
+	printf '%s\n' "$$ollama_pid" >"$$pid_path"; \
 	for attempt in 1 2 3 4 5 6 7 8 9 10; do \
 		if env OLLAMA_HOST="$$host_env" ollama list >/dev/null 2>&1; then \
 			echo "Ollama is ready."; \
@@ -50,4 +62,4 @@ ensure-ollama:
 		fi; \
 		sleep 1; \
 	done; \
-	echo "Warning: Ollama did not become ready yet. NicoChat will continue starting."
+	echo "Warning: Ollama did not become ready yet. NicoChat will continue starting. PID: $$ollama_pid"

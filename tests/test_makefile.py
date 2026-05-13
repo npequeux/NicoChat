@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 class TestEnsureOllama(unittest.TestCase):
@@ -49,7 +49,7 @@ class TestEnsureOllama(unittest.TestCase):
             env.update(extra_env)
         return subprocess.run(
             ["make", "ensure-ollama"],
-            cwd=REPO_ROOT,
+            cwd=_REPO_ROOT,
             env=env,
             capture_output=True,
             text=True,
@@ -69,7 +69,11 @@ class TestEnsureOllama(unittest.TestCase):
                 extra_env={"PATH": f"{bin_dir}:{os.environ['PATH']}"}
             )
 
-            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.returncode,
+                0,
+                f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}",
+            )
             self.assertIn("Starting local Ollama service", result.stdout)
             self.assertIn("Ollama is ready.", result.stdout)
             calls = (state_dir / "calls.log").read_text(encoding="utf-8").splitlines()
@@ -93,7 +97,11 @@ class TestEnsureOllama(unittest.TestCase):
                 }
             )
 
-            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.returncode,
+                0,
+                f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}",
+            )
             self.assertEqual(result.stdout.strip(), "")
             self.assertFalse((state_dir / "calls.log").exists())
 
