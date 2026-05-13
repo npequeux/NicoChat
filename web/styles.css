@@ -110,6 +110,36 @@ textarea {
   margin-top: 1rem;
 }
 
+.model-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.model-selector label {
+  font-size: 0.85rem;
+  color: #7dd3fc;
+  white-space: nowrap;
+}
+
+.model-selector select {
+  background: rgba(15, 23, 42, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+  color: #e2e8f0;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  flex: 1;
+  max-width: 360px;
+}
+
+.model-selector select:focus {
+  outline: none;
+  border-color: #38bdf8;
+}
+
 textarea {
   width: 100%;
   resize: vertical;

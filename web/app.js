@@ -3,6 +3,7 @@ const messagesElement = document.getElementById("messages");
 const form = document.getElementById("chatForm");
 const input = document.getElementById("messageInput");
 const sendButton = document.getElementById("sendButton");
+const modelSelect = document.getElementById("modelSelect");
 
 function appendMessage(role, content) {
   const card = document.createElement("article");
@@ -28,11 +29,46 @@ async function refreshHealth() {
   document.getElementById("modelValue").textContent = payload.model;
 }
 
+async function loadModels() {
+  try {
+    const response = await fetch("/api/models");
+    const payload = await response.json();
+    const modelNames = payload.models || [];
+
+    modelSelect.innerHTML = "";
+    if (modelNames.length === 0) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.disabled = true;
+      opt.selected = true;
+      opt.textContent = "No models found";
+      modelSelect.append(opt);
+      sendButton.disabled = true;
+    } else {
+      modelNames.forEach((name) => {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        modelSelect.append(opt);
+      });
+    }
+  } catch (error) {
+    console.error("Failed to load models:", error);
+    modelSelect.innerHTML = '<option value="" disabled selected>Unavailable</option>';
+    sendButton.disabled = true;
+  }
+}
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const content = input.value.trim();
   if (!content) {
+    return;
+  }
+
+  const model = modelSelect.value;
+  if (!model) {
     return;
   }
 
@@ -45,7 +81,7 @@ form.addEventListener("submit", async (event) => {
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ model, messages }),
     });
 
     const payload = await response.json();
@@ -75,4 +111,8 @@ refreshHealth().catch(() => {
   document.getElementById("backendValue").textContent = "Unavailable";
   document.getElementById("modeValue").textContent = "Unavailable";
   document.getElementById("modelValue").textContent = "Unavailable";
+});
+
+loadModels().then(() => {
+  appendMessage("assistant", "Welcome to NicoChat. Select a model above and start chatting — no internet required.");
 });
