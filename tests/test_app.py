@@ -84,6 +84,12 @@ class TestIndexRoute(unittest.TestCase):
             resp = self.client.get("/")
             self.assertIn(b"llama3:latest", resp.data)
 
+    def test_index_uses_clean_title_without_emoji(self):
+        with patch.object(self.app_module, "get_ollama_models", return_value=["llama3:latest"]):
+            resp = self.client.get("/")
+            self.assertIn(b"<h1>NicoChat</h1>", resp.data)
+            self.assertNotIn("\U0001F916".encode("utf-8"), resp.data)
+
     def test_index_includes_model_selection_help(self):
         with patch.object(self.app_module, "get_ollama_models", return_value=["llama3:latest"]):
             resp = self.client.get("/")
