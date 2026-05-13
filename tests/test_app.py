@@ -41,10 +41,9 @@ class TestGetModels(unittest.TestCase):
     """Tests for the /models endpoint and get_ollama_models helper."""
 
     def setUp(self):
-        with patch("ollama.list", return_value=_make_fake_models("llama3:latest", "mistral:latest")):
-            import app as _app
-            self.app_module = _app
-            self.client = _app.app.test_client()
+        import app as _app
+        self.app_module = _app
+        self.client = _app.app.test_client()
 
     def test_models_endpoint_returns_list(self):
         with patch.object(self.app_module, "get_ollama_models", return_value=["llama3:latest", "mistral:latest"]):

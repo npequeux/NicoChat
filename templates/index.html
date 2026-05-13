@@ -351,7 +351,9 @@
               bubble.textContent = fullContent;
               chatWindow.scrollTop = chatWindow.scrollHeight;
             }
-          } catch (_) {}
+          } catch (parseErr) {
+            console.error('Failed to parse SSE payload:', payload, parseErr);
+          }
         }
       }
     } catch (err) {
