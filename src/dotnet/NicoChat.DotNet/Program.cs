@@ -23,6 +23,12 @@ app.UseStaticFiles(new StaticFileOptions
 app.MapGet("/api/health", (ChatGateway gateway) =>
     Results.Ok(new HealthResponse("ok", gateway.Backend, gateway.Model, gateway.Mode)));
 
+app.MapGet("/api/models", async (ChatGateway gateway, CancellationToken cancellationToken) =>
+{
+    var models = await gateway.GetModelsAsync(cancellationToken);
+    return Results.Ok(new ModelsResponse(models));
+});
+
 app.MapPost("/api/chat", async Task<IResult> (ChatRequest request, ChatGateway gateway, CancellationToken cancellationToken) =>
 {
     if (request.Messages is not { Count: > 0 })
@@ -37,10 +43,12 @@ app.MapPost("/api/chat", async Task<IResult> (ChatRequest request, ChatGateway g
         return Results.BadRequest(new ErrorResponse("At least one non-empty user message is required."));
     }
 
+    var model = string.IsNullOrWhiteSpace(request.Model) ? gateway.Model : request.Model;
+
     try
     {
-        var content = await gateway.GetReplyAsync(request.Messages, cancellationToken);
-        return Results.Ok(new ChatReply("assistant", content, gateway.Mode, gateway.Model));
+        var content = await gateway.GetReplyAsync(request.Messages, model, cancellationToken);
+        return Results.Ok(new ChatReply("assistant", content, gateway.Mode, model));
     }
     catch (HttpRequestException exception)
     {
@@ -63,7 +71,27 @@ sealed class ChatGateway(HttpClient httpClient)
     public string Model { get; } = Environment.GetEnvironmentVariable("OLLAMA_MODEL") ?? "qwen3";
     public string Mode => _useMock ? "mock" : "ollama";
 
-    public async Task<string> GetReplyAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<string>> GetModelsAsync(CancellationToken cancellationToken)
+    {
+        if (_useMock)
+        {
+            return [Model];
+        }
+
+        try
+        {
+            var tags = await _httpClient.GetFromJsonAsync<OllamaTagsResponse>(
+                $"{_ollamaUrl}/api/tags", cancellationToken);
+            var names = tags?.Models?.Select(m => m.Name).Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
+            return names is { Count: > 0 } ? names! : [Model];
+        }
+        catch
+        {
+            return [Model];
+        }
+    }
+
+    public async Task<string> GetReplyAsync(IReadOnlyList<ChatMessage> messages, string model, CancellationToken cancellationToken)
     {
         if (_useMock)
         {
@@ -74,7 +102,7 @@ sealed class ChatGateway(HttpClient httpClient)
 
         using var response = await _httpClient.PostAsJsonAsync(
             $"{_ollamaUrl}/api/chat",
-            new OllamaRequest(Model, false, messages.Select(message =>
+            new OllamaRequest(model, false, messages.Select(message =>
                 new ChatMessage(message.Role.ToLowerInvariant(), message.Content)).ToArray()),
             cancellationToken);
 
@@ -108,7 +136,7 @@ sealed class ChatGateway(HttpClient httpClient)
     }
 }
 
-sealed record ChatRequest(IReadOnlyList<ChatMessage> Messages);
+sealed record ChatRequest(IReadOnlyList<ChatMessage> Messages, string? Model = null);
 
 sealed record ChatMessage(string Role, string Content);
 
@@ -117,6 +145,12 @@ sealed record ChatReply(string Role, string Content, string Mode, string Model);
 sealed record ErrorResponse(string Error);
 
 sealed record HealthResponse(string Status, string Backend, string Model, string Mode);
+
+sealed record ModelsResponse(IReadOnlyList<string> Models);
+
+sealed record OllamaTagsResponse(IReadOnlyList<OllamaModelInfo>? Models);
+
+sealed record OllamaModelInfo(string Name);
 
 sealed record OllamaRequest(string Model, bool Stream, IReadOnlyList<ChatMessage> Messages);
 

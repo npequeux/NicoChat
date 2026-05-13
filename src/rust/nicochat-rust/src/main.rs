@@ -46,6 +46,7 @@ async fn main() {
         .route("/manifest.webmanifest", get(manifest))
         .route("/sw.js", get(sw_js))
         .route("/api/health", get(health))
+        .route("/api/models", get(models))
         .route("/api/chat", post(chat))
         .with_state(state);
 
@@ -74,6 +75,7 @@ struct ChatMessage {
 #[derive(Debug, Deserialize)]
 struct ChatRequest {
     messages: Vec<ChatMessage>,
+    model: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -95,6 +97,21 @@ struct HealthResponse {
 #[derive(Debug, Serialize)]
 struct ErrorResponse {
     error: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ModelsResponse {
+    models: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaTagsResponse {
+    models: Option<Vec<OllamaModelInfo>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaModelInfo {
+    name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -136,6 +153,34 @@ async fn health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     })
 }
 
+async fn models(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    if state.use_mock {
+        return Json(ModelsResponse { models: vec![state.model.clone()] });
+    }
+
+    let result = state
+        .client
+        .get(format!("{}/api/tags", state.ollama_url))
+        .send()
+        .await;
+
+    let model_names = match result {
+        Ok(response) if response.status().is_success() => {
+            response
+                .json::<OllamaTagsResponse>()
+                .await
+                .ok()
+                .and_then(|tags| tags.models)
+                .map(|list| list.into_iter().map(|m| m.name).filter(|n| !n.is_empty()).collect::<Vec<_>>())
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| vec![state.model.clone()])
+        }
+        _ => vec![state.model.clone()],
+    };
+
+    Json(ModelsResponse { models: model_names })
+}
+
 async fn chat(
     State(state): State<Arc<AppState>>,
     Json(request): Json<ChatRequest>,
@@ -152,23 +197,31 @@ async fn chat(
         return Err(bad_request("At least one non-empty user message is required."));
     }
 
+    let model = request
+        .model
+        .as_deref()
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or(&state.model)
+        .to_string();
+
     let content = if state.use_mock {
         build_mock_reply(&request.messages)
     } else {
-        fetch_ollama_reply(&state, &request.messages).await?
+        fetch_ollama_reply(&state, &request.messages, &model).await?
     };
 
     Ok(Json(ChatReply {
         role: "assistant",
         content,
         mode: state.mode(),
-        model: state.model.clone(),
+        model,
     }))
 }
 
 async fn fetch_ollama_reply(
     state: &AppState,
     messages: &[ChatMessage],
+    model: &str,
 ) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
     let normalized_messages = messages
         .iter()
@@ -179,7 +232,7 @@ async fn fetch_ollama_reply(
         .client
         .post(format!("{}/api/chat", state.ollama_url))
         .json(&json!({
-            "model": state.model,
+            "model": model,
             "stream": false,
             "messages": normalized_messages,
         }))

@@ -26,14 +26,14 @@
       </section>
 
       <section class="chat-card">
+        <div class="model-selector">
+          <label for="modelSelect">Model:</label>
+          <select id="modelSelect" title="Select model">
+            <option value="" disabled selected>Loading models…</option>
+          </select>
+        </div>
+
         <div id="messages" class="messages" aria-live="polite">
-          <article class="message assistant">
-            <p class="role">assistant</p>
-            <p>
-              Welcome to NicoChat. Start a conversation, or enable
-              <code>NICOCHAT_USE_MOCK=true</code> to test without Ollama.
-            </p>
-          </article>
         </div>
 
         <form id="chatForm" class="composer">
