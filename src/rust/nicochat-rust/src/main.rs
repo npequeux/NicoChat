@@ -32,7 +32,7 @@ async fn main() {
             .unwrap_or_else(|_| "http://127.0.0.1:11434".to_string())
             .trim_end_matches('/')
             .to_string(),
-        model: env::var("OLLAMA_MODEL").unwrap_or_else(|_| "llama3.2:1b".to_string()),
+        model: env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen3".to_string()),
         use_mock: env::var("NICOCHAT_USE_MOCK")
             .map(|value| value.eq_ignore_ascii_case("true"))
             .unwrap_or(false),

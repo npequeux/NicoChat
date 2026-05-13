@@ -60,7 +60,7 @@ http://<your-machine-ip>:5000
 Environment variables shared by all backends:
 
 - `OLLAMA_URL` (default: `http://127.0.0.1:11434`)
-- `OLLAMA_MODEL` (default: `llama3.2:1b`)
+- `OLLAMA_MODEL` (default: `qwen3`)
 - `NICOCHAT_USE_MOCK=true` — bypass Ollama and return deterministic mock replies
 - `PORT` — for the Rust backend
 - `ASPNETCORE_URLS` — for the .NET backend
