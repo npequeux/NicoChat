@@ -80,6 +80,8 @@ class TestEnsureOllama(unittest.TestCase):
             self.assertEqual(calls[0], "list")
             self.assertEqual(calls[-1], "list")
             self.assertEqual(calls.count("serve"), 1)
+            self.assertGreater(calls.index("serve"), 0)
+            self.assertLess(calls.index("serve"), len(calls) - 1)
 
     def test_ensure_ollama_is_skipped_in_mock_mode(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -65,4 +65,4 @@ ensure-ollama:
 		sleep 1; \
 		attempt=$$((attempt + 1)); \
 	done; \
-	echo "Warning: Ollama did not become ready within $(OLLAMA_READY_TIMEOUT) seconds. NicoChat will continue starting; check $$log_path or start Ollama manually. PID: $$ollama_pid"
+	echo "Warning: Ollama did not become ready within $(OLLAMA_READY_TIMEOUT) seconds. NicoChat will continue starting, but chat requests may fail until Ollama is ready; check $$log_path or start Ollama manually. PID: $$ollama_pid"
