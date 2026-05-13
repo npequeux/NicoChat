@@ -1,7 +1,34 @@
 # Compile
 
-At the moment, this repository does not contain any source files or build configuration.
+NicoChat can be compiled with either the `.NET` backend or the `Rust` backend.
 
-Because of that, there is currently nothing to compile.
+## Requirements
 
-If source code and build files are added later, this document should be updated with the exact build command to use.
+- `make`
+- one backend toolchain:
+  - `.NET SDK 10` for the `.NET` backend
+  - `Rust` and `cargo` for the `Rust` backend
+
+## Build the .NET backend
+
+```bash
+make build BACKEND=dotnet
+```
+
+This builds the project at:
+
+```text
+src/dotnet/NicoChat.DotNet/NicoChat.DotNet.csproj
+```
+
+## Build the Rust backend
+
+```bash
+make build BACKEND=rust
+```
+
+This builds the project at:
+
+```text
+src/rust/nicochat-rust/Cargo.toml
+```
