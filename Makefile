@@ -1,6 +1,7 @@
 BACKEND ?= dotnet
 PORT ?= 5000
 OLLAMA_URL ?= http://127.0.0.1:11434
+OLLAMA_LOG_PATH ?= /tmp/nicochat-ollama.log
 
 .PHONY: build run ensure-ollama
 
@@ -41,7 +42,7 @@ ensure-ollama:
 		exit 0; \
 	fi; \
 	echo "Starting local Ollama service on $$host_env..."; \
-	nohup env OLLAMA_HOST="$$host_env" ollama serve >/tmp/nicochat-ollama.log 2>&1 & \
+	nohup env OLLAMA_HOST="$$host_env" ollama serve >"$(OLLAMA_LOG_PATH)" 2>&1 & \
 	for attempt in 1 2 3 4 5 6 7 8 9 10; do \
 		if env OLLAMA_HOST="$$host_env" ollama list >/dev/null 2>&1; then \
 			echo "Ollama is ready."; \
