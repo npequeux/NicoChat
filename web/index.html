@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NicoChat</title>
+    <meta name="theme-color" content="#111827" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Local AI chat</p>
+          <h1>NicoChat</h1>
+          <p class="subtitle">
+            A local-network chat UI backed by either a .NET or Rust server.
+          </p>
+        </div>
+        <div class="status-card">
+          <p><strong>Backend:</strong> <span id="backendValue">Loading…</span></p>
+          <p><strong>Mode:</strong> <span id="modeValue">Loading…</span></p>
+          <p><strong>Model:</strong> <span id="modelValue">Loading…</span></p>
+        </div>
+      </section>
+
+      <section class="chat-card">
+        <div id="messages" class="messages" aria-live="polite">
+          <article class="message assistant">
+            <p class="role">assistant</p>
+            <p>
+              Welcome to NicoChat. Start a conversation, or enable
+              <code>NICOCHAT_USE_MOCK=true</code> to test without Ollama.
+            </p>
+          </article>
+        </div>
+
+        <form id="chatForm" class="composer">
+          <label class="sr-only" for="messageInput">Message</label>
+          <textarea
+            id="messageInput"
+            name="message"
+            rows="3"
+            placeholder="Ask something…"
+            required
+          ></textarea>
+          <div class="composer-actions">
+            <p class="hint">
+              Android client available in the <code>android/</code> folder.
+            </p>
+            <button id="sendButton" type="submit">Send</button>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

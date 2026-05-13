@@ -1,0 +1,8 @@
+src/dotnet/NicoChat.DotNet/bin/
+src/dotnet/NicoChat.DotNet/obj/
+src/rust/nicochat-rust/target/
+android/.gradle/
+android/app/build/
+.DS_Store
+.idea/
+.vscode/
