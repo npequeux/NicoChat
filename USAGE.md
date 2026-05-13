@@ -35,6 +35,23 @@ To access it from another device on your local network, open:
 http://<your-machine-ip>:5000
 ```
 
+## Select a model from the list
+
+When the page loads, NicoChat fills the model dropdown with the models available in
+your local Ollama instance. Choose one from that list before sending a message.
+
+If the dropdown is empty, check your local models:
+
+```bash
+ollama list
+```
+
+If needed, pull a model and refresh the page:
+
+```bash
+ollama pull llama3
+```
+
 ## Test without Ollama
 
 If you want to try the UI without a local model, enable mock mode:

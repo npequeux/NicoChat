@@ -114,5 +114,5 @@ refreshHealth().catch(() => {
 });
 
 loadModels().then(() => {
-  appendMessage("assistant", "Welcome to NicoChat. Select a model above and start chatting — no internet required.");
+  appendMessage("assistant", "Welcome to NicoChat. Select a model from the list above and start chatting — no internet required.");
 });

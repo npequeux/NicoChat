@@ -21,6 +21,7 @@
       padding: 12px 20px;
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
       gap: 16px;
       border-bottom: 1px solid #0f3460;
       flex-shrink: 0;
@@ -45,6 +46,19 @@
     }
 
     #model-select:focus { outline: none; border-color: #e94560; }
+
+    .model-picker {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: flex-start;
+    }
+
+    .model-help {
+      color: #9fb3c8;
+      font-size: 0.8rem;
+      max-width: 320px;
+    }
 
     #no-models-warning {
       display: none;
@@ -197,22 +211,25 @@
 
 <header>
   <h1>🤖 NicoChat</h1>
-  <select id="model-select" title="Select model">
-    {% if models %}
-      {% for model in models %}
-        <option value="{{ model }}">{{ model }}</option>
-      {% endfor %}
-    {% else %}
-      <option value="" disabled selected>No models found</option>
-    {% endif %}
-  </select>
+  <div class="model-picker">
+    <select id="model-select" title="Select model">
+      {% if models %}
+        {% for model in models %}
+          <option value="{{ model }}">{{ model }}</option>
+        {% endfor %}
+      {% else %}
+        <option value="" disabled selected>No models found</option>
+      {% endif %}
+    </select>
+    <span class="model-help">Choose a model from the Ollama list above. If none appear, pull one and refresh.</span>
+  </div>
   <span id="no-models-warning">⚠ Start Ollama &amp; pull a model</span>
 </header>
 
 <div id="chat-window">
   <div id="empty-state">
     <span class="icon">💬</span>
-    <p>Select a model above and start chatting — no internet required.</p>
+    <p>Select a model from the list above and start chatting — no internet required.</p>
   </div>
 </div>
 

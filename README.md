@@ -31,7 +31,9 @@ python app.py
 # → http://127.0.0.1:5000
 ```
 
-Select a model from the header dropdown and start chatting. Responses stream in real time.
+Select a model from the header dropdown list and start chatting. Responses stream in real time.
+If the list is empty, verify your local models with `ollama list` or pull one with
+`ollama pull llama3`, then refresh the page.
 
 ---
 
