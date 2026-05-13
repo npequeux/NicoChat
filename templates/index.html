@@ -320,7 +320,7 @@
       if (!response.ok) {
         const err = await response.json();
         bubble.classList.remove('typing');
-        bubble.textContent = '⚠ Error: ' + (err.error || response.statusText);
+        bubble.textContent = '\u26A0 Error: ' + (err.error || response.statusText);
         setStatus('');
         return;
       }
@@ -344,7 +344,7 @@
           try {
             const parsed = JSON.parse(payload);
             if (parsed.error) {
-              bubble.textContent = '⚠ ' + parsed.error;
+              bubble.textContent = '\u26A0 ' + parsed.error;
               bubble.classList.remove('typing');
             } else if (parsed.content) {
               fullContent += parsed.content;
@@ -357,7 +357,7 @@
         }
       }
     } catch (err) {
-      bubble.textContent = '⚠ Network error: ' + err.message;
+      bubble.textContent = '\u26A0 Network error: ' + err.message;
     } finally {
       bubble.classList.remove('typing');
       if (fullContent) {

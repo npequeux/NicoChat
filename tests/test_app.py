@@ -100,7 +100,11 @@ class TestChatRoute(unittest.TestCase):
         self.app_module = _app
 
     def _collect_sse(self, response_data: bytes) -> list[dict]:
-        """Parse SSE lines and return a list of JSON payloads."""
+        """Parse Server-Sent Events (SSE) bytes and return a list of JSON payloads.
+
+        Each line of the form ``data: <json>`` is decoded; the ``[DONE]``
+        sentinel and non-data lines are skipped.
+        """
         events = []
         for line in response_data.decode().splitlines():
             if line.startswith("data: ") and line[6:] != "[DONE]":
