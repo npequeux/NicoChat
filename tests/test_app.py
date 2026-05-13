@@ -6,6 +6,8 @@ import types
 import unittest
 from unittest.mock import MagicMock, patch
 
+ROBOT_EMOJI = "\U0001F916"
+
 
 # ---------------------------------------------------------------------------
 # Helpers to build fake Ollama responses without requiring the real daemon
@@ -83,6 +85,12 @@ class TestIndexRoute(unittest.TestCase):
         with patch.object(self.app_module, "get_ollama_models", return_value=["llama3:latest"]):
             resp = self.client.get("/")
             self.assertIn(b"llama3:latest", resp.data)
+
+    def test_index_uses_clean_title_without_emoji(self):
+        with patch.object(self.app_module, "get_ollama_models", return_value=["llama3:latest"]):
+            resp = self.client.get("/")
+            self.assertIn(b"<h1>NicoChat</h1>", resp.data)
+            self.assertNotIn(ROBOT_EMOJI.encode("utf-8"), resp.data)
 
     def test_index_includes_model_selection_help(self):
         with patch.object(self.app_module, "get_ollama_models", return_value=["llama3:latest"]):
