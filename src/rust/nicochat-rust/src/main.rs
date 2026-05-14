@@ -6,7 +6,7 @@ use axum::{
     Json, Router,
 };
 use regex::Regex;
-use reqwest::Client;
+use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fs;
@@ -541,30 +541,54 @@ async fn chat(
         }
     }
 
-    if internet_access && is_image_request(&latest_user_content) {
-        let image_query = build_image_search_query(&request.messages, &latest_user_content);
-        // let has_media_in_model_reply = response_contains_media_url(&content);
-        let fetched_urls = if let Some(urls) = fetch_wikimedia_image_urls(&state.client, &image_query, 3).await {
-            Some(urls)
-        } else {
-            fetch_wikipedia_image_urls(&state.client, &image_query, 3).await
-        };
+    if is_image_request(&latest_user_content) {
+        let image_candidates = build_image_search_candidates(&request.messages, &latest_user_content);
+        let mut selected_query = image_candidates
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "person portrait".to_string());
+        let mut image_urls = Vec::new();
 
-        if let Some(image_urls) = fetched_urls {
-            if !image_urls.is_empty() {
-                let media_block = image_urls
-                    .iter()
-                    .map(|url| format!("- ![]({url})"))
-                    .collect::<Vec<_>>()
-                    .join("\n");
+        for candidate in &image_candidates {
+            let fetched_urls = if let Some(urls) = fetch_wikimedia_image_urls(&state.client, candidate, 3).await {
+                Some(urls)
+            } else if let Some(urls) = fetch_wikipedia_image_urls(&state.client, candidate, 3).await {
+                Some(urls)
+            } else {
+                fetch_openverse_image_urls(&state.client, candidate, 3).await
+            };
 
-                // Always show the image block if images are found, regardless of model reply
-                content = format!(
-                    "Voici des images pour \"{}\":\n{}",
-                    image_query,
-                    media_block
-                );
+            if let Some(urls) = fetched_urls {
+                if !urls.is_empty() {
+                    selected_query = candidate.clone();
+                    image_urls = urls;
+                    break;
+                }
             }
+        }
+
+        if image_urls.is_empty() {
+            // Fallback: salvage valid direct image links from model output.
+            image_urls = extract_image_urls_from_text(&content, 3);
+        }
+
+        if !image_urls.is_empty() {
+            let media_block = image_urls
+                .iter()
+                .map(|url| format!("- ![]({url})"))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            content = format!(
+                "Voici des images pour \"{}\":\n{}",
+                selected_query,
+                media_block
+            );
+        } else {
+            content = format!(
+                "Je n'ai pas trouve d'image fiable pour \"{}\". Essaye avec une requete plus precise (ex: \"photo portrait Ray Charles\").",
+                selected_query
+            );
         }
     }
 
@@ -595,6 +619,94 @@ fn is_image_request(text: &str) -> bool {
         || lower.contains("show me")
 }
 
+fn normalize_image_url(raw: &str) -> Option<String> {
+    let trimmed = raw
+        .trim()
+        .trim_matches(|c: char| matches!(c, '"' | '\'' | '(' | ')' | '[' | ']' | '<' | '>' | ',' | '.'));
+
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut candidate = trimmed.to_string();
+
+    if let Ok(parsed) = Url::parse(trimmed) {
+        if parsed.host_str().is_some_and(|h| h.contains("duckduckgo.com")) {
+            for (k, v) in parsed.query_pairs() {
+                if k == "u" && (v.starts_with("http://") || v.starts_with("https://")) {
+                    candidate = v.into_owned();
+                    break;
+                }
+            }
+        }
+    }
+
+    let lower = candidate.to_lowercase();
+    if lower.contains("external-content.duckduckgo.com/ip3/") {
+        return None;
+    }
+
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return None;
+    }
+
+    if lower.ends_with(".ico") {
+        return None;
+    }
+
+    let parsed = Url::parse(&candidate).ok();
+    let host = parsed
+        .as_ref()
+        .and_then(|u| u.host_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let path = parsed
+        .as_ref()
+        .map(|u| u.path().to_lowercase())
+        .unwrap_or_else(|| lower.clone());
+
+    let path_has_image_ext = path.ends_with(".png")
+        || path.ends_with(".jpg")
+        || path.ends_with(".jpeg")
+        || path.ends_with(".webp")
+        || path.ends_with(".gif");
+
+    let trusted_image_host = host.contains("upload.wikimedia.org")
+        || host.contains("wikipedia.org")
+        || host.contains("wikimedia.org")
+        || host.contains("cdn.artphotolimited.com");
+
+    let looks_like_image = path_has_image_ext
+        || trusted_image_host
+        || lower.contains("commons.wikimedia.org/wiki/special:filepath/");
+
+    if !looks_like_image {
+        return None;
+    }
+
+    Some(candidate)
+}
+
+fn extract_image_urls_from_text(text: &str, limit: usize) -> Vec<String> {
+    let Ok(url_regex) = Regex::new(r"https?://\S+") else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for m in url_regex.find_iter(text) {
+        if let Some(url) = normalize_image_url(m.as_str()) {
+            if !out.contains(&url) {
+                out.push(url);
+                if out.len() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+
+    out
+}
+
 fn sanitize_image_query(raw: &str) -> String {
     let cleaned = raw
         .chars()
@@ -620,6 +732,9 @@ fn strip_image_request_words(text: &str) -> String {
         r"(?i)montre\s*moi",
         r"(?i)peux[-\s]*tu\s*montrer",
         r"(?i)show\s*me",
+        r"(?i)photo\s+du",
+        r"(?i)photo\s+de\s+la",
+        r"(?i)photo\s+d'",
         r"(?i)une?\s+photo\s+de",
         r"(?i)des?\s+photos\s+de",
         r"(?i)une?\s+image\s+de",
@@ -637,11 +752,42 @@ fn strip_image_request_words(text: &str) -> String {
     sanitize_image_query(out.trim())
 }
 
+fn cleanup_image_subject(text: &str) -> String {
+    let noise_words = [
+        "photo", "photos", "image", "images", "picture", "pic", "portrait", "show", "me",
+        "de", "du", "des", "la", "le", "les", "d", "une", "un", "the", "a", "an",
+    ];
+
+    let filtered = text
+        .split_whitespace()
+        .filter(|token| {
+            let lower = token.to_lowercase();
+            !noise_words.contains(&lower.as_str())
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    sanitize_image_query(filtered.trim())
+}
+
+fn image_subject_aliases(subject: &str) -> Vec<String> {
+    let lower = subject.to_lowercase();
+    let mut aliases = Vec::new();
+
+    if lower == "pape" || lower == "le pape" || lower == "du pape" {
+        aliases.push("pope".to_string());
+        aliases.push("pope francis".to_string());
+    }
+
+    aliases
+}
+
 fn build_image_search_query(messages: &[ChatMessage], latest_user: &str) -> String {
     let stripped = strip_image_request_words(latest_user);
-    let lower = stripped.to_lowercase();
+    let subject = cleanup_image_subject(&stripped);
+    let lower = subject.to_lowercase();
 
-    let refers_pronoun = stripped.is_empty()
+    let refers_pronoun = subject.is_empty()
         || lower == "lui"
         || lower == "elle"
         || lower == "him"
@@ -649,7 +795,7 @@ fn build_image_search_query(messages: &[ChatMessage], latest_user: &str) -> Stri
         || lower == "them";
 
     if !refers_pronoun {
-        return format!("{} portrait photo", stripped);
+        return subject;
     }
 
     if let Some(previous_user) = messages
@@ -659,13 +805,44 @@ fn build_image_search_query(messages: &[ChatMessage], latest_user: &str) -> Stri
         .map(|m| m.content.trim())
         .find(|content| !content.is_empty() && *content != latest_user)
     {
-        let inferred = sanitize_image_query(previous_user);
+        let inferred = cleanup_image_subject(&sanitize_image_query(previous_user));
         if !inferred.is_empty() {
-            return format!("{} portrait photo", inferred);
+            return inferred;
         }
     }
 
-    "portrait person photo".to_string()
+    "person portrait".to_string()
+}
+
+fn build_image_search_candidates(messages: &[ChatMessage], latest_user: &str) -> Vec<String> {
+    let base = build_image_search_query(messages, latest_user);
+    let mut candidates = Vec::new();
+
+    if !base.is_empty() {
+        candidates.push(base.clone());
+        candidates.push(format!("{} photo", base));
+        candidates.push(format!("{} portrait", base));
+    }
+
+    for alias in image_subject_aliases(&base) {
+        candidates.push(alias.clone());
+        candidates.push(format!("{} photo", alias));
+        candidates.push(format!("{} portrait", alias));
+    }
+
+    if candidates.is_empty() {
+        candidates.push("person portrait".to_string());
+    }
+
+    let mut deduped = Vec::new();
+    for c in candidates {
+        let clean = sanitize_image_query(&c);
+        if !clean.is_empty() && !deduped.contains(&clean) {
+            deduped.push(clean);
+        }
+    }
+
+    deduped
 }
 
 async fn fetch_wikimedia_image_urls(client: &Client, query: &str, limit: usize) -> Option<Vec<String>> {
@@ -702,8 +879,8 @@ async fn fetch_wikimedia_image_urls(client: &Client, query: &str, limit: usize) 
             .map(|u| u.trim().to_string());
 
         if let Some(url) = maybe_url {
-            if url.starts_with("http://") || url.starts_with("https://") {
-                urls.push(url);
+            if let Some(clean_url) = normalize_image_url(&url) {
+                urls.push(clean_url);
             }
         }
         if urls.len() >= gsr_limit {
@@ -750,11 +927,55 @@ async fn fetch_wikipedia_image_urls(client: &Client, query: &str, limit: usize) 
             .map(|s| s.trim().to_string());
 
         if let Some(url) = maybe_url {
-            if url.starts_with("http://") || url.starts_with("https://") {
-                urls.push(url);
+            if let Some(clean_url) = normalize_image_url(&url) {
+                urls.push(clean_url);
             }
         }
         if urls.len() >= search_limit {
+            break;
+        }
+    }
+
+    if urls.is_empty() {
+        None
+    } else {
+        Some(urls)
+    }
+}
+
+async fn fetch_openverse_image_urls(client: &Client, query: &str, limit: usize) -> Option<Vec<String>> {
+    let cleaned_query = sanitize_image_query(query);
+    if cleaned_query.is_empty() {
+        return None;
+    }
+
+    let encoded_query = cleaned_query.split_whitespace().collect::<Vec<_>>().join("+");
+    let page_size = limit.clamp(1, 8);
+    let url = format!(
+        "https://api.openverse.org/v1/images/?q={encoded_query}&page_size={page_size}"
+    );
+
+    let response = client.get(url).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let payload: serde_json::Value = response.json().await.ok()?;
+    let results = payload.get("results")?.as_array()?;
+
+    let mut urls = Vec::new();
+    for item in results {
+        let maybe_url = item
+            .get("url")
+            .and_then(|u| u.as_str())
+            .map(|u| u.trim().to_string());
+
+        if let Some(url) = maybe_url {
+            if let Some(clean_url) = normalize_image_url(&url) {
+                urls.push(clean_url);
+            }
+        }
+        if urls.len() >= page_size {
             break;
         }
     }
@@ -1563,7 +1784,7 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_weather_city;
+    use super::{build_image_search_candidates, extract_weather_city};
 
     #[test]
     fn test_extract_weather_city_no_city_provided() {
@@ -1588,6 +1809,30 @@ mod tests {
         assert_eq!(
             extract_weather_city("weather in New York"),
             Some("New York".to_string())
+        );
+    }
+
+    #[test]
+    fn test_image_candidates_for_pope_prompt() {
+        let messages = vec![];
+        let candidates = build_image_search_candidates(&messages, "photo du pape");
+
+        assert!(!candidates.is_empty());
+        assert!(candidates.iter().any(|q| q == "pape"));
+        assert!(candidates.iter().any(|q| q == "pope"));
+    }
+
+    #[test]
+    fn test_image_candidates_for_ray_charles_prompt() {
+        let messages = vec![];
+        let candidates = build_image_search_candidates(&messages, "photo portrait Ray Charles");
+
+        assert!(!candidates.is_empty());
+        assert!(candidates.iter().any(|q| q == "Ray Charles"));
+        assert!(
+            !candidates
+                .iter()
+                .any(|q| q.to_lowercase().contains("portrait photo portrait"))
         );
     }
 }
