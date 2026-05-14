@@ -30,6 +30,18 @@ let thinkingStartedAt = 0;
 let thinkingEstimatedSeconds = null;
 let thinkingPredictedTokens = null;
 
+const TOKEN_CALIBRATION_KEY = "nicochat-token-calibration";
+const DEFAULT_TOKEN_CALIBRATION = {
+  charsPerToken: 3.2,
+  promptOverhead: 24,
+  promptExpansion: 1.35,
+  completion: {
+    fast: 180,
+    balanced: 320,
+    quality: 520,
+  },
+};
+
 if (input) {
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -69,10 +81,151 @@ function appendMessage(role, content, usage = null) {
     if (rich) {
       card.append(rich);
     }
+
+    const media = extractMediaEmbeds(content);
+    const mediaBlock = renderMediaEmbeds(media);
+    if (mediaBlock) {
+      card.append(mediaBlock);
+    }
   }
 
   messagesElement.append(card);
   messagesElement.scrollTop = messagesElement.scrollHeight;
+}
+
+function normalizeMediaUrl(url) {
+  if (!url) return null;
+  const cleaned = url.trim().replace(/[),.;!?]+$/, "");
+  if (!cleaned.startsWith("http://") && !cleaned.startsWith("https://")) {
+    return null;
+  }
+  return cleaned;
+}
+
+function classifyMediaUrl(url) {
+  const lower = url.toLowerCase();
+
+  if (/\.(png|jpe?g|gif|webp|avif|svg)(\?.*)?$/.test(lower)) {
+    return "image";
+  }
+  if (/\.(mp4|webm|mov|m4v|ogv)(\?.*)?$/.test(lower)) {
+    return "video";
+  }
+  if (/\.(mp3|wav|ogg|m4a|flac)(\?.*)?$/.test(lower)) {
+    return "audio";
+  }
+  if (/youtube\.com\/watch\?v=|youtu\.be\//.test(lower)) {
+    return "youtube";
+  }
+
+  return null;
+}
+
+function getYoutubeEmbedUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes("youtu.be")) {
+      const id = parsed.pathname.replace("/", "").trim();
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    }
+    if (parsed.hostname.includes("youtube.com")) {
+      const id = parsed.searchParams.get("v");
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
+function extractMediaEmbeds(content) {
+  const text = content || "";
+  const found = [];
+  const seen = new Set();
+
+  const markdownImageRegex = /!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/gi;
+  for (const match of text.matchAll(markdownImageRegex)) {
+    const url = normalizeMediaUrl(match[1]);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    found.push({ type: "image", url });
+  }
+
+  const urlRegex = /https?:\/\/[^\s<>"]+/gi;
+  for (const match of text.matchAll(urlRegex)) {
+    const url = normalizeMediaUrl(match[0]);
+    if (!url || seen.has(url)) continue;
+
+    const type = classifyMediaUrl(url);
+    if (!type) continue;
+
+    seen.add(url);
+    found.push({ type, url });
+  }
+
+  return found.slice(0, 6);
+}
+
+function renderMediaEmbeds(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return null;
+  }
+
+  const container = document.createElement("div");
+  container.className = "media-grid";
+
+  items.forEach((item) => {
+    const card = document.createElement("div");
+    card.className = "media-card";
+
+    if (item.type === "image") {
+      const img = document.createElement("img");
+      img.className = "media-image";
+      img.src = item.url;
+      img.alt = "Assistant media image";
+      img.loading = "lazy";
+      card.append(img);
+    } else if (item.type === "video") {
+      const video = document.createElement("video");
+      video.className = "media-video";
+      video.src = item.url;
+      video.controls = true;
+      video.preload = "metadata";
+      card.append(video);
+    } else if (item.type === "audio") {
+      const audio = document.createElement("audio");
+      audio.className = "media-audio";
+      audio.src = item.url;
+      audio.controls = true;
+      card.append(audio);
+    } else if (item.type === "youtube") {
+      const embed = getYoutubeEmbedUrl(item.url);
+      if (embed) {
+        const frame = document.createElement("iframe");
+        frame.className = "media-video";
+        frame.src = embed;
+        frame.title = "YouTube video";
+        frame.loading = "lazy";
+        frame.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+        frame.referrerPolicy = "strict-origin-when-cross-origin";
+        frame.allowFullscreen = true;
+        card.append(frame);
+      }
+    }
+
+    if (card.childElementCount > 0) {
+      const caption = document.createElement("a");
+      caption.className = "media-caption";
+      caption.href = item.url;
+      caption.target = "_blank";
+      caption.rel = "noopener noreferrer";
+      caption.textContent = item.url;
+      card.append(caption);
+      container.append(card);
+    }
+  });
+
+  return container.childElementCount > 0 ? container : null;
 }
 
 function importDocumentToComposer(file) {
@@ -249,18 +402,71 @@ function formatDuration(seconds) {
   return `${String(minutes).padStart(2, "0")}:${secs.toFixed(1).padStart(4, "0")}`;
 }
 
-function estimateTokensFromMessages(chatMessages) {
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getTokenCalibration() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(TOKEN_CALIBRATION_KEY) || "null");
+    if (!parsed || typeof parsed !== "object") {
+      return { ...DEFAULT_TOKEN_CALIBRATION };
+    }
+
+    return {
+      charsPerToken: Number.isFinite(parsed.charsPerToken)
+        ? clamp(parsed.charsPerToken, 2.2, 6)
+        : DEFAULT_TOKEN_CALIBRATION.charsPerToken,
+      promptOverhead: Number.isFinite(parsed.promptOverhead)
+        ? clamp(parsed.promptOverhead, 0, 256)
+        : DEFAULT_TOKEN_CALIBRATION.promptOverhead,
+      promptExpansion: Number.isFinite(parsed.promptExpansion)
+        ? clamp(parsed.promptExpansion, 1, 3)
+        : DEFAULT_TOKEN_CALIBRATION.promptExpansion,
+      completion: {
+        fast: Number.isFinite(parsed.completion?.fast)
+          ? clamp(parsed.completion.fast, 60, 1200)
+          : DEFAULT_TOKEN_CALIBRATION.completion.fast,
+        balanced: Number.isFinite(parsed.completion?.balanced)
+          ? clamp(parsed.completion.balanced, 80, 1800)
+          : DEFAULT_TOKEN_CALIBRATION.completion.balanced,
+        quality: Number.isFinite(parsed.completion?.quality)
+          ? clamp(parsed.completion.quality, 120, 2600)
+          : DEFAULT_TOKEN_CALIBRATION.completion.quality,
+      },
+    };
+  } catch (_) {
+    return { ...DEFAULT_TOKEN_CALIBRATION };
+  }
+}
+
+function saveTokenCalibration(calibration) {
+  window.localStorage.setItem(TOKEN_CALIBRATION_KEY, JSON.stringify(calibration));
+}
+
+function estimateBasePromptTokens(chatMessages, calibration) {
   const textLength = chatMessages.reduce((sum, message) => {
     const content = typeof message.content === "string" ? message.content : "";
     return sum + content.length;
   }, 0);
-  return Math.max(16, Math.round(textLength / 4));
+
+  return Math.max(
+    16,
+    Math.round(textLength / calibration.charsPerToken + calibration.promptOverhead)
+  );
+}
+
+function estimateTokensFromMessages(chatMessages) {
+  const calibration = getTokenCalibration();
+  const base = estimateBasePromptTokens(chatMessages, calibration);
+  return Math.round(base * calibration.promptExpansion);
 }
 
 function estimateCompletionTokens(speedMode) {
-  if (speedMode === "fast") return 90;
-  if (speedMode === "quality") return 280;
-  return 160;
+  const calibration = getTokenCalibration();
+  if (speedMode === "fast") return Math.round(calibration.completion.fast);
+  if (speedMode === "quality") return Math.round(calibration.completion.quality);
+  return Math.round(calibration.completion.balanced);
 }
 
 function getStoredTokensPerSecond() {
@@ -278,6 +484,36 @@ function updateStoredTokensPerSecond(usage) {
   const previous = getStoredTokensPerSecond();
   const smoothed = previous * 0.65 + tps * 0.35;
   window.localStorage.setItem("nicochat-tps", String(smoothed));
+}
+
+function updateTokenCalibration(usage, messagesForRequest, speedMode) {
+  if (!usage || !Array.isArray(messagesForRequest) || messagesForRequest.length === 0) {
+    return;
+  }
+
+  const calibration = getTokenCalibration();
+  const actualPrompt = Number(usage.prompt_tokens);
+  const actualCompletion = Number(usage.completion_tokens);
+
+  if (Number.isFinite(actualPrompt) && actualPrompt > 0) {
+    const estimatedBase = estimateBasePromptTokens(messagesForRequest, calibration);
+    if (estimatedBase > 0) {
+      const observedExpansion = clamp(actualPrompt / estimatedBase, 1, 3);
+      calibration.promptExpansion = clamp(
+        calibration.promptExpansion * 0.75 + observedExpansion * 0.25,
+        1,
+        3
+      );
+    }
+  }
+
+  if (Number.isFinite(actualCompletion) && actualCompletion > 0) {
+    const key = speedMode === "fast" || speedMode === "quality" ? speedMode : "balanced";
+    const previous = calibration.completion[key];
+    calibration.completion[key] = clamp(previous * 0.75 + actualCompletion * 0.25, 60, 2600);
+  }
+
+  saveTokenCalibration(calibration);
 }
 
 function buildThinkingEstimate(messagesForRequest, speedMode) {
@@ -690,6 +926,7 @@ if (form) {
 
       hideThinkingIndicator();
       updateStoredTokensPerSecond(payload.usage);
+      updateTokenCalibration(payload.usage, [roleSystemMessage, ...requestMessages], speedMode);
       messages.push({ role: payload.role, content: payload.content });
       appendMessage(payload.role, payload.content, payload.usage || null);
       await refreshHealth();

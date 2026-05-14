@@ -472,6 +472,7 @@ async fn chat(
             max_tokens,
             internet_access,
             chosen_accel.as_deref(),
+            request.speed_mode.as_deref(),
         )
         .await?
     };
@@ -516,6 +517,7 @@ async fn chat(
                         max_tokens,
                         internet_access,
                         chosen_accel.as_deref(),
+                        request.speed_mode.as_deref(),
                     )
                     .await?
                 };
@@ -1171,6 +1173,7 @@ async fn fetch_ollama_reply_tuned(
     max_tokens: u32,
     internet_access: bool,
     accelerator: Option<&str>,
+    speed_mode: Option<&str>,
 ) -> Result<(String, Option<UsageStats>), (StatusCode, Json<ErrorResponse>)> {
 
     // If internet access is disabled, block any user/system message that looks like a web request
@@ -1193,10 +1196,21 @@ async fn fetch_ollama_reply_tuned(
     options.insert("repeat_penalty".to_string(), json!(repeat_penalty));
     options.insert("num_predict".to_string(), json!(max_tokens));
 
+    let cpu_threads = std::thread::available_parallelism()
+        .map(|n| n.get() as u32)
+        .unwrap_or(8);
+    options.insert("num_thread".to_string(), json!(cpu_threads));
+
     // Make accelerator choice visible in inference behavior.
     match accelerator {
         Some("gpu") => {
             options.insert("num_gpu".to_string(), json!(999));
+            let gpu_batch = match speed_mode {
+                Some("fast") => 512,
+                Some("quality") => 1024,
+                _ => 768,
+            };
+            options.insert("num_batch".to_string(), json!(gpu_batch));
         }
         _ => {}
     }
