@@ -1,24 +1,38 @@
+
 :root {
   color-scheme: light;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: #f3f4f6;
-  color: #111827;
+  background: #f0f4ff;
+  color: #102040;
+  --primary-blue: #2563eb;
+  --primary-blue-dark: #1d4ed8;
+  --accent-yellow: #ffe066;
+  --accent-yellow-dark: #ffd60a;
+  --background-light: #f0f4ff;
+  --background-white: #ffffff;
+  --border-blue: #2563eb33;
+  --border-yellow: #ffe06699;
 }
 
 * {
   box-sizing: border-box;
 }
 
+
 body {
   margin: 0;
   min-height: 100vh;
-  background: #f3f4f6;
+  background: var(--background-light);
 }
+
 
 .app-shell {
   max-width: 960px;
   margin: 0 auto;
   padding: 2rem 1rem 3rem;
+  background: var(--background-white);
+  border-radius: 18px;
+  box-shadow: 0 4px 24px 0 #2563eb11;
 }
 
 .hero,
@@ -36,11 +50,13 @@ button {
   align-items: start;
 }
 
+
 .eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #6b7280;
+  color: var(--primary-blue);
   font-size: 0.8rem;
+  font-weight: 700;
 }
 
 h1 {
@@ -48,28 +64,38 @@ h1 {
   font-size: clamp(2.2rem, 6vw, 4rem);
 }
 
+
 .subtitle,
 .hint,
 .status-card p,
 .message p {
   margin: 0;
-  color: #4b5563;
+  color: #102040;
 }
+
 
 .status-card,
 .chat-card,
 textarea {
-  background: #ffffff;
-  border: 1px solid #d1d5db;
+  background: var(--background-white);
+  border: 1px solid var(--border-blue);
 }
+
 
 .status-card {
   padding: 1rem;
+  background: var(--accent-yellow);
+  border: 1.5px solid var(--border-yellow);
+  color: #102040;
 }
+
 
 .chat-card {
   margin-top: 1.5rem;
   padding: 1rem;
+  background: var(--background-white);
+  border: 1.5px solid var(--primary-blue);
+  box-shadow: 0 2px 12px 0 #2563eb11;
 }
 
 .messages {
@@ -85,24 +111,29 @@ textarea {
   max-width: 80%;
 }
 
+
 .message.assistant {
   align-self: flex-start;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
+  background: var(--background-white);
+  border: 1.5px solid var(--primary-blue);
+  color: #102040;
 }
 
 .message.user {
   align-self: flex-end;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
+  background: var(--accent-yellow);
+  border: 1.5px solid var(--border-yellow);
+  color: #102040;
 }
+
 
 .role {
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   margin-bottom: 0.35rem !important;
-  color: #6b7280 !important;
+  color: var(--primary-blue) !important;
+  font-weight: 700;
 }
 
 .composer {
@@ -122,11 +153,12 @@ textarea {
   white-space: nowrap;
 }
 
+
 .model-selector select {
-  background: #ffffff;
-  border: 1px solid #d1d5db;
+  background: var(--background-white);
+  border: 1.5px solid var(--primary-blue);
   border-radius: 10px;
-  color: #111827;
+  color: #102040;
   padding: 0.45rem 0.75rem;
   font-size: 0.9rem;
   cursor: pointer;
@@ -136,7 +168,8 @@ textarea {
 
 .model-selector select:focus {
   outline: none;
-  border-color: #2563eb;
+  border-color: var(--accent-yellow);
+  box-shadow: 0 0 0 2px var(--accent-yellow-dark);
 }
 
 textarea {
@@ -154,17 +187,22 @@ textarea {
   margin-top: 0.75rem;
 }
 
+
 button {
   border: none;
   padding: 0.8rem 1.3rem;
-  background: #2563eb;
-  color: white;
+  background: var(--primary-blue);
+  color: #102040;
   font-weight: 700;
   cursor: pointer;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px 0 #2563eb22;
+  transition: background 0.2s, color 0.2s;
 }
 
 button:hover {
-  background: #1d4ed8;
+  background: var(--accent-yellow);
+  color: #102040;
 }
 
 button:disabled {
@@ -183,8 +221,13 @@ button:disabled {
   border: 0;
 }
 
+
 code {
-  color: #f8fafc;
+  color: var(--primary-blue-dark);
+  background: var(--accent-yellow);
+  padding: 0.15em 0.4em;
+  border-radius: 6px;
+  font-size: 1em;
 }
 
 @media (max-width: 640px) {

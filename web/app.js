@@ -1,9 +1,22 @@
 const messages = [];
 const messagesElement = document.getElementById("messages");
+
 const form = document.getElementById("chatForm");
 const input = document.getElementById("messageInput");
 const sendButton = document.getElementById("sendButton");
 const modelSelect = document.getElementById("modelSelect");
+
+// Enable Enter to send, Shift+Enter for newline
+if (input) {
+  input.addEventListener("keydown", function(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!sendButton.disabled) {
+        sendButton.click();
+      }
+    }
+  });
+}
 
 function appendMessage(role, content) {
   const card = document.createElement("article");
