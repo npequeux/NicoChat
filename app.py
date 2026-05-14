@@ -59,11 +59,13 @@ def ensure_ollama_running():
         ready_timeout_seconds = 10
     ready_timeout_seconds = max(ready_timeout_seconds, 0)
 
-    for attempt in range(ready_timeout_seconds + 1):
+    if _ollama_available(host):
+        return
+
+    for _ in range(ready_timeout_seconds):
+        time.sleep(1)
         if _ollama_available(host):
             return
-        if attempt < ready_timeout_seconds:
-            time.sleep(1)
 
 
 def get_ollama_models():
