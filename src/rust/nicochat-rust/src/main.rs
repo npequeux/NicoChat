@@ -10,6 +10,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{env, sync::Arc};
+use std::process::Command;
 
 const INDEX_HTML: &str = include_str!("../../../../web/index.html");
 const APP_JS: &str = include_str!("../../../../web/app.js");
@@ -52,17 +53,63 @@ async fn main() {
         .route("/api/restart-ollama", post(restart_ollama))
         .with_state(state);
 
-use std::process::Command;
+async fn restart_ollama(payload: Option<Json<RestartOllamaRequest>>) -> impl IntoResponse {
+    restart_ollama_with_accel(payload.map(|p| p.0)).await
+}
 
-async fn restart_ollama() -> impl IntoResponse {
+#[derive(Debug, Deserialize)]
+struct RestartOllamaRequest {
+    accelerator: Option<String>,
+    accelerators: Option<Vec<String>>,
+}
+
+async fn restart_ollama_with_accel(payload: Option<RestartOllamaRequest>) -> impl IntoResponse {
     // Try to stop Ollama (ignore errors if not running)
     let _ = Command::new("ollama").arg("stop").output();
-    // Start Ollama (in background)
-    let result = Command::new("ollama").arg("serve").spawn();
+
+    let selected = payload
+        .as_ref()
+        .and_then(|p| select_effective_accelerator(p.accelerators.as_deref(), p.accelerator.as_deref()));
+
+    if let Some(accel) = selected.as_ref() {
+        unsafe {
+            std::env::set_var("OLLAMA_ACCELERATOR", accel);
+        }
+    }
+
+    // Start Ollama with selected accelerator env.
+    let mut cmd = Command::new("ollama");
+    cmd.arg("serve");
+    if let Some(accel) = selected {
+        cmd.env("OLLAMA_ACCELERATOR", accel);
+    }
+    let result = cmd.spawn();
     match result {
         Ok(_) => (StatusCode::OK, "Ollama restarted".to_string()),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to restart Ollama: {e}")),
     }
+}
+
+fn select_effective_accelerator(accelerators: Option<&[String]>, fallback: Option<&str>) -> Option<String> {
+    if let Some(values) = accelerators {
+        let has_gpu = values.iter().any(|v| v.eq_ignore_ascii_case("gpu"));
+        let has_npu = values.iter().any(|v| v.eq_ignore_ascii_case("npu"));
+
+        // GPU/NPU are mutually exclusive. If both are present, GPU wins deterministically.
+        if has_gpu {
+            return Some("gpu".to_string());
+        }
+        if has_npu {
+            return Some("npu".to_string());
+        }
+        if values.iter().any(|v| v.eq_ignore_ascii_case("remote")) {
+            return Some("remote".to_string());
+        }
+    }
+
+    fallback
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| value == "gpu" || value == "npu" || value == "remote")
 }
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
@@ -111,6 +158,7 @@ struct HealthResponse {
     backend: &'static str,
     model: String,
     mode: &'static str,
+    accelerator: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -186,11 +234,13 @@ async fn sw_js() -> Response {
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let accelerator = env::var("OLLAMA_ACCELERATOR").unwrap_or_else(|_| "default".to_string());
     Json(HealthResponse {
         status: "ok",
         backend: "Rust",
         model: state.model.clone(),
         mode: state.mode(),
+        accelerator,
     })
 }
 
@@ -220,6 +270,30 @@ async fn models(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     };
 
     Json(ModelsResponse { models: model_names })
+}
+
+fn select_effective_accelerator_for_chat(
+    accelerators: Option<&[String]>,
+    fallback: Option<&str>,
+) -> Option<String> {
+    if let Some(values) = accelerators {
+        let has_gpu = values.iter().any(|v| v.eq_ignore_ascii_case("gpu"));
+        let has_npu = values.iter().any(|v| v.eq_ignore_ascii_case("npu"));
+
+        if has_gpu {
+            return Some("gpu".to_string());
+        }
+        if has_npu {
+            return Some("npu".to_string());
+        }
+        if values.iter().any(|v| v.eq_ignore_ascii_case("remote")) {
+            return Some("remote".to_string());
+        }
+    }
+
+    fallback
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| value == "gpu" || value == "npu" || value == "remote")
 }
 
 async fn chat(
@@ -255,11 +329,10 @@ async fn chat(
 
     // Accelerator: set env for new Ollama launches (not for running daemon)
     // Use first enabled accelerator from array, fallback to legacy single value
-    let chosen_accel = request
-        .accelerators
-        .as_ref()
-        .and_then(|v| v.first().cloned())
-        .or_else(|| request.accelerator.clone());
+    let chosen_accel = select_effective_accelerator_for_chat(
+        request.accelerators.as_deref(),
+        request.accelerator.as_deref(),
+    );
     if let Some(accel) = chosen_accel {
         unsafe {
             std::env::set_var("OLLAMA_ACCELERATOR", &accel);

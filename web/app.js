@@ -78,6 +78,14 @@ function getAccelerators() {
     .map((button) => button.id);
 }
 
+function normalizeAccelerators(values) {
+  const unique = [...new Set(values)];
+  if (unique.includes("gpu") && unique.includes("npu")) {
+    return unique.filter((value) => value !== "npu");
+  }
+  return unique;
+}
+
 function getInternetAccess() {
   return internetAccessToggle?.classList.contains("active") ?? true;
 }
@@ -100,6 +108,7 @@ async function refreshHealth() {
   document.getElementById("backendValue").textContent = payload.backend;
   document.getElementById("modeValue").textContent = payload.mode;
   document.getElementById("modelValue").textContent = payload.model;
+  document.getElementById("acceleratorValue").textContent = payload.accelerator || "default";
 }
 
 async function loadModels() {
@@ -231,12 +240,23 @@ function setupControls() {
   } catch (_) {
     // Ignore malformed localStorage data.
   }
+  savedAccelerators = normalizeAccelerators(savedAccelerators);
   applyAcceleratorToggleState(savedAccelerators);
+  window.localStorage.setItem("nicochat-accelerators", JSON.stringify(savedAccelerators));
 
   acceleratorButtons.forEach((button) => {
     if (!button.element) return;
     button.element.addEventListener("click", () => {
       button.element.classList.toggle("active");
+
+      // GPU and NPU are mutually exclusive.
+      if (button.id === "gpu" && button.element.classList.contains("active") && npuToggle) {
+        npuToggle.classList.remove("active");
+      }
+      if (button.id === "npu" && button.element.classList.contains("active") && gpuToggle) {
+        gpuToggle.classList.remove("active");
+      }
+
       const active = getAccelerators();
       window.localStorage.setItem("nicochat-accelerators", JSON.stringify(active));
       showRestartNotice();
@@ -251,7 +271,13 @@ function setupControls() {
       }
 
       try {
-        const response = await fetch("/api/restart-ollama", { method: "POST" });
+        const accelerators = getAccelerators();
+        const accelerator = accelerators[0] || null;
+        const response = await fetch("/api/restart-ollama", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accelerator, accelerators }),
+        });
         if (response.ok) {
           if (restartOllamaStatus) {
             restartOllamaStatus.textContent = "Ollama restarted.";
@@ -344,6 +370,7 @@ refreshHealth().catch(() => {
   document.getElementById("backendValue").textContent = "Unavailable";
   document.getElementById("modeValue").textContent = "Unavailable";
   document.getElementById("modelValue").textContent = "Unavailable";
+  document.getElementById("acceleratorValue").textContent = "Unavailable";
 });
 
 loadModels().then(() => {
