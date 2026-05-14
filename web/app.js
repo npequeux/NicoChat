@@ -53,11 +53,6 @@ function appendMessage(role, content) {
   card.append(roleLabel, body);
 
   if (role === "assistant") {
-    const exportActions = createReplyExportActions(content);
-    if (exportActions) {
-      card.append(exportActions);
-    }
-
     const insights = extractResponseInsights(content);
     const rich = renderRichInsights(insights);
     if (rich) {
@@ -67,108 +62,6 @@ function appendMessage(role, content) {
 
   messagesElement.append(card);
   messagesElement.scrollTop = messagesElement.scrollHeight;
-}
-
-function makeDownloadFileName(prefix, extension) {
-  const timestamp = new Date().toISOString().slice(0, -1).replace(/[T:.]/g, "-");
-  return `nicochat-${prefix}-${timestamp}.${extension}`;
-}
-
-function triggerDownload(url, fileName) {
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.append(link);
-  link.click();
-  link.remove();
-}
-
-function exportReplyAsDocument(content) {
-  const blob = new Blob([content || ""], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  triggerDownload(url, makeDownloadFileName("reply", "txt"));
-  URL.revokeObjectURL(url);
-}
-
-function renderReplyToPng(content) {
-  const text = (content || "").trim() || " ";
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-
-  const maxTextWidth = 800;
-  const padding = 24;
-  const lineHeight = 28;
-
-  ctx.font = "16px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-
-  const lines = [];
-  for (const paragraph of text.split("\n")) {
-    const words = paragraph.split(/\s+/).filter(Boolean);
-    if (words.length === 0) {
-      lines.push("");
-      continue;
-    }
-
-    let currentLine = words[0];
-    for (let index = 1; index < words.length; index += 1) {
-      const candidate = `${currentLine} ${words[index]}`;
-      if (ctx.measureText(candidate).width <= maxTextWidth) {
-        currentLine = candidate;
-      } else {
-        lines.push(currentLine);
-        currentLine = words[index];
-      }
-    }
-    lines.push(currentLine);
-  }
-
-  const measuredLineWidths = lines.map((line) => ctx.measureText(line || " ").width);
-  const widestLine = measuredLineWidths.length > 0 ? Math.max(...measuredLineWidths) : 0;
-  const textWidth = Math.min(maxTextWidth, widestLine);
-  canvas.width = Math.ceil(textWidth + padding * 2);
-  canvas.height = Math.max(120, Math.ceil(lines.length * lineHeight + padding * 2));
-
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  ctx.fillStyle = "#1f2937";
-  ctx.font = "16px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-  let y = padding + lineHeight * 0.8;
-  for (const line of lines) {
-    ctx.fillText(line || " ", padding, y);
-    y += lineHeight;
-  }
-
-  return canvas.toDataURL("image/png");
-}
-
-function exportReplyAsPicture(content) {
-  const pngData = renderReplyToPng(content);
-  if (!pngData) return;
-  triggerDownload(pngData, makeDownloadFileName("reply", "png"));
-}
-
-function createReplyExportActions(content) {
-  if (!content) return null;
-
-  const actions = document.createElement("div");
-  actions.className = "reply-export-actions";
-
-  const exportPictureButton = document.createElement("button");
-  exportPictureButton.type = "button";
-  exportPictureButton.className = "reply-export-button";
-  exportPictureButton.textContent = "Export picture";
-  exportPictureButton.addEventListener("click", () => exportReplyAsPicture(content));
-
-  const exportDocumentButton = document.createElement("button");
-  exportDocumentButton.type = "button";
-  exportDocumentButton.className = "reply-export-button";
-  exportDocumentButton.textContent = "Export document";
-  exportDocumentButton.addEventListener("click", () => exportReplyAsDocument(content));
-
-  actions.append(exportPictureButton, exportDocumentButton);
-  return actions;
 }
 
 function importDocumentToComposer(file) {
