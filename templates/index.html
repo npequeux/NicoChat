@@ -260,6 +260,7 @@
   // Conversation history for multi-turn context
   let history = [];
   let isStreaming = false;
+  let lastModelsRefreshAt = 0;
 
   // Show warning when no models are available
   if (!modelSelect.value) {
@@ -268,6 +269,10 @@
   }
 
   async function refreshModels() {
+    const now = Date.now();
+    if (now - lastModelsRefreshAt < 1000) return;
+    lastModelsRefreshAt = now;
+
     try {
       const response = await fetch('/models');
       const payload = await response.json();

@@ -24,8 +24,18 @@ def _ollama_host():
 
 
 def _ollama_env(host):
-    allowed = ["PATH", "HOME", "USER", "TMPDIR", "XDG_DATA_HOME", "XDG_CONFIG_HOME"]
-    env = {k: os.environ[k] for k in allowed if k in os.environ}
+    env = dict(os.environ)
+    for key in (
+        "GITHUB_TOKEN",
+        "ACTIONS_RUNTIME_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+        "NPM_TOKEN",
+        "PYPI_TOKEN",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_ACCESS_KEY_ID",
+    ):
+        env.pop(key, None)
     env["OLLAMA_HOST"] = host
     return env
 
