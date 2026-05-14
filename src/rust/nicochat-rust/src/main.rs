@@ -1109,18 +1109,9 @@ async fn fetch_ollama_reply_tuned(
     top_k: u32,
     repeat_penalty: f32,
     max_tokens: u32,
-    internet_access: bool,
+    _internet_access: bool,
     accelerator: Option<&str>,
 ) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
-
-    // If internet access is disabled, block any user/system message that looks like a web request
-    if !internet_access {
-        let forbidden = messages.iter().any(|m| m.content.contains("http://") || m.content.contains("https://") || m.content.to_lowercase().contains("fetch ") || m.content.to_lowercase().contains("curl "));
-        if forbidden {
-            return Err((StatusCode::FORBIDDEN, Json(ErrorResponse { error: "Internet access is disabled for this conversation.".to_string() })));
-        }
-    }
-
     let normalized_messages = messages
         .iter()
         .map(|message| json!({ "role": message.role.to_lowercase(), "content": message.content }))
@@ -1251,7 +1242,10 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_weather_city;
+    use super::{extract_weather_city, fetch_ollama_reply_tuned, AppState, ChatMessage};
+    use axum::{routing::post, Json, Router};
+    use reqwest::Client;
+    use serde_json::json;
 
     #[test]
     fn test_extract_weather_city_no_city_provided() {
@@ -1277,5 +1271,50 @@ mod tests {
             extract_weather_city("weather in New York"),
             Some("New York".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn test_fetch_ollama_reply_tuned_allows_url_when_internet_toggle_off() {
+        let app = Router::new().route(
+            "/api/chat",
+            post(|| async { Json(json!({ "message": { "content": "ok" } })) }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test listener");
+        let address = listener.local_addr().expect("listener address");
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve test app");
+        });
+
+        let state = AppState {
+            client: Client::new(),
+            ollama_url: format!("http://{}", address),
+            model: "qwen3".to_string(),
+            use_mock: false,
+        };
+
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: "Summarize https://example.com please".to_string(),
+        }];
+
+        let reply = fetch_ollama_reply_tuned(
+            &state,
+            &messages,
+            "qwen3",
+            0.5,
+            0.95,
+            20,
+            1.0,
+            64,
+            false,
+            None,
+        )
+        .await
+        .expect("chat response");
+
+        assert_eq!(reply, "ok");
     }
 }
