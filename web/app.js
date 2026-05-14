@@ -25,6 +25,10 @@ const acceleratorButtons = [
 ];
 
 let thinkingMessageCard = null;
+let thinkingTicker = null;
+let thinkingStartedAt = 0;
+let thinkingEstimatedSeconds = null;
+let thinkingPredictedTokens = null;
 
 if (input) {
   input.addEventListener("keydown", (event) => {
@@ -37,7 +41,7 @@ if (input) {
   });
 }
 
-function appendMessage(role, content) {
+function appendMessage(role, content, usage = null) {
   if (!messagesElement) return;
 
   const card = document.createElement("article");
@@ -51,6 +55,13 @@ function appendMessage(role, content) {
   body.textContent = content;
 
   card.append(roleLabel, body);
+
+  if (usage && role === "assistant") {
+    const usageLine = document.createElement("p");
+    usageLine.className = "usage-meta";
+    usageLine.textContent = formatUsage(usage);
+    card.append(usageLine);
+  }
 
   if (role === "assistant") {
     const insights = extractResponseInsights(content);
@@ -231,13 +242,80 @@ const ROLE_SYSTEM_PROMPTS = {
 const DEFAULT_BREVITY_INSTRUCTION =
   "Default response style: reply in at most 3 sentences when possible. If the user explicitly asks for more detail, you can provide a longer answer.";
 
+function formatDuration(seconds) {
+  const safe = Math.max(0, seconds);
+  const minutes = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${String(minutes).padStart(2, "0")}:${secs.toFixed(1).padStart(4, "0")}`;
+}
+
+function estimateTokensFromMessages(chatMessages) {
+  const textLength = chatMessages.reduce((sum, message) => {
+    const content = typeof message.content === "string" ? message.content : "";
+    return sum + content.length;
+  }, 0);
+  return Math.max(16, Math.round(textLength / 4));
+}
+
+function estimateCompletionTokens(speedMode) {
+  if (speedMode === "fast") return 90;
+  if (speedMode === "quality") return 280;
+  return 160;
+}
+
+function getStoredTokensPerSecond() {
+  const raw = Number.parseFloat(window.localStorage.getItem("nicochat-tps") || "");
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return 28;
+  }
+  return raw;
+}
+
+function updateStoredTokensPerSecond(usage) {
+  const tps = Number(usage?.tokens_per_second);
+  if (!Number.isFinite(tps) || tps <= 0) return;
+
+  const previous = getStoredTokensPerSecond();
+  const smoothed = previous * 0.65 + tps * 0.35;
+  window.localStorage.setItem("nicochat-tps", String(smoothed));
+}
+
+function buildThinkingEstimate(messagesForRequest, speedMode) {
+  const promptTokens = estimateTokensFromMessages(messagesForRequest);
+  const completionTokens = estimateCompletionTokens(speedMode);
+  const predictedTokens = promptTokens + completionTokens;
+  const tps = getStoredTokensPerSecond();
+  const etaSeconds = Math.max(0.8, predictedTokens / tps);
+  return {
+    predictedTokens,
+    etaSeconds,
+  };
+}
+
+function formatUsage(usage) {
+  const parts = [];
+  if (Number.isFinite(usage?.total_tokens)) {
+    parts.push(`tokens ${usage.total_tokens}`);
+  }
+  if (Number.isFinite(usage?.prompt_tokens) && Number.isFinite(usage?.completion_tokens)) {
+    parts.push(`prompt ${usage.prompt_tokens} + completion ${usage.completion_tokens}`);
+  }
+  if (Number.isFinite(usage?.total_time_ms)) {
+    parts.push(`${(usage.total_time_ms / 1000).toFixed(2)}s total`);
+  }
+  if (Number.isFinite(usage?.tokens_per_second)) {
+    parts.push(`${Number(usage.tokens_per_second).toFixed(1)} tok/s`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : "usage unavailable";
+}
+
 function getRoleSystemMessage() {
   const role = roleSelect?.value || "default";
   const prompt = ROLE_SYSTEM_PROMPTS[role] || ROLE_SYSTEM_PROMPTS.default;
   return { role: "system", content: `${prompt}\n\n${DEFAULT_BREVITY_INSTRUCTION}` };
 }
 
-function showThinkingIndicator() {
+function showThinkingIndicator(estimate = null) {
   if (!messagesElement || thinkingMessageCard) return;
 
   const card = document.createElement("article");
@@ -268,17 +346,59 @@ function showThinkingIndicator() {
   dots.innerHTML = "<span></span><span></span><span></span>";
 
   row.append(orbit, text, dots);
-  card.append(roleLabel, row);
+
+  const metrics = document.createElement("p");
+  metrics.className = "thinking-metrics";
+  metrics.innerHTML = 'elapsed <span data-elapsed>00:00.0</span> · eta <span data-eta>--:--.-</span> · predicted <span data-predicted>--</span> tokens';
+
+  card.append(roleLabel, row, metrics);
 
   messagesElement.append(card);
   messagesElement.scrollTop = messagesElement.scrollHeight;
   thinkingMessageCard = card;
+
+  thinkingStartedAt = Date.now();
+  thinkingEstimatedSeconds = estimate?.etaSeconds ?? null;
+  thinkingPredictedTokens = estimate?.predictedTokens ?? null;
+
+  const predictedNode = card.querySelector('[data-predicted]');
+  if (predictedNode) {
+    predictedNode.textContent = thinkingPredictedTokens ? String(thinkingPredictedTokens) : "--";
+  }
+
+  thinkingTicker = window.setInterval(() => {
+    if (!thinkingMessageCard) return;
+
+    const elapsedSec = (Date.now() - thinkingStartedAt) / 1000;
+    const elapsedNode = thinkingMessageCard.querySelector('[data-elapsed]');
+    const etaNode = thinkingMessageCard.querySelector('[data-eta]');
+
+    if (elapsedNode) {
+      elapsedNode.textContent = formatDuration(elapsedSec);
+    }
+
+    if (etaNode) {
+      if (thinkingEstimatedSeconds) {
+        const remaining = Math.max(0, thinkingEstimatedSeconds - elapsedSec);
+        etaNode.textContent = formatDuration(remaining);
+      } else {
+        etaNode.textContent = "--:--.-";
+      }
+    }
+  }, 100);
 }
 
 function hideThinkingIndicator() {
+  if (thinkingTicker) {
+    window.clearInterval(thinkingTicker);
+    thinkingTicker = null;
+  }
   if (!thinkingMessageCard) return;
   thinkingMessageCard.remove();
   thinkingMessageCard = null;
+  thinkingStartedAt = 0;
+  thinkingEstimatedSeconds = null;
+  thinkingPredictedTokens = null;
 }
 
 function getAccelerators() {
@@ -539,7 +659,6 @@ if (form) {
 
     input.value = "";
     sendButton.disabled = true;
-    showThinkingIndicator();
 
     try {
       const requestMessages = getMessagesForRequest(messages);
@@ -548,6 +667,8 @@ if (form) {
       const accelerator = accelerators[0] || null;
       const internetAccess = getInternetAccess();
       const roleSystemMessage = getRoleSystemMessage();
+      const estimate = buildThinkingEstimate([roleSystemMessage, ...requestMessages], speedMode);
+      showThinkingIndicator(estimate);
 
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -568,8 +689,9 @@ if (form) {
       }
 
       hideThinkingIndicator();
+      updateStoredTokensPerSecond(payload.usage);
       messages.push({ role: payload.role, content: payload.content });
-      appendMessage(payload.role, payload.content);
+      appendMessage(payload.role, payload.content, payload.usage || null);
       await refreshHealth();
     } catch (error) {
       hideThinkingIndicator();

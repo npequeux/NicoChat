@@ -204,6 +204,17 @@ struct ChatReply {
     content: String,
     mode: &'static str,
     model: String,
+    usage: Option<UsageStats>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct UsageStats {
+    prompt_tokens: Option<u32>,
+    completion_tokens: Option<u32>,
+    total_tokens: Option<u32>,
+    total_time_ms: Option<u64>,
+    eval_time_ms: Option<u64>,
+    tokens_per_second: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -239,6 +250,10 @@ struct OllamaModelInfo {
 #[derive(Debug, Deserialize)]
 struct OllamaResponse {
     message: Option<OllamaMessage>,
+    prompt_eval_count: Option<u32>,
+    eval_count: Option<u32>,
+    total_duration: Option<u64>,
+    eval_duration: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -443,8 +458,8 @@ async fn chat(
         }
     }
 
-    let mut content = if state.use_mock {
-        build_mock_reply(&request.messages)
+    let (mut content, mut usage) = if state.use_mock {
+        (build_mock_reply(&request.messages), None)
     } else {
         fetch_ollama_reply_tuned(
             &state,
@@ -487,8 +502,8 @@ async fn chat(
                     },
                 );
 
-                content = if state.use_mock {
-                    build_mock_reply(&request.messages)
+                let retry_result = if state.use_mock {
+                    (build_mock_reply(&request.messages), None)
                 } else {
                     fetch_ollama_reply_tuned(
                         &state,
@@ -505,6 +520,9 @@ async fn chat(
                     .await?
                 };
 
+                content = retry_result.0;
+                usage = retry_result.1;
+
                 // Hard guarantee: if model still returns a generic refusal, answer directly from fetched data.
                 if is_unhelpful_reply(&content) {
                     content = build_grounded_answer_from_context(&internet_context);
@@ -518,7 +536,16 @@ async fn chat(
         content,
         mode: state.mode(),
         model,
+        usage,
     }))
+}
+
+fn nanos_to_ms(value: Option<u64>) -> Option<u64> {
+    value.map(|nanos| nanos / 1_000_000)
+}
+
+fn round2(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
 }
 
 fn is_unhelpful_reply(reply: &str) -> bool {
@@ -1144,7 +1171,7 @@ async fn fetch_ollama_reply_tuned(
     max_tokens: u32,
     internet_access: bool,
     accelerator: Option<&str>,
-) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<(String, Option<UsageStats>), (StatusCode, Json<ErrorResponse>)> {
 
     // If internet access is disabled, block any user/system message that looks like a web request
     if !internet_access {
@@ -1222,7 +1249,33 @@ async fn fetch_ollama_reply_tuned(
         ));
     }
 
-    Ok(content)
+    let prompt_tokens = payload.prompt_eval_count;
+    let completion_tokens = payload.eval_count;
+    let total_tokens = match (prompt_tokens, completion_tokens) {
+        (Some(p), Some(c)) => Some(p + c),
+        _ => None,
+    };
+
+    let total_time_ms = nanos_to_ms(payload.total_duration);
+    let eval_time_ms = nanos_to_ms(payload.eval_duration);
+    let tokens_per_second = match (completion_tokens, payload.eval_duration) {
+        (Some(tokens), Some(eval_ns)) if eval_ns > 0 => {
+            let seconds = eval_ns as f64 / 1_000_000_000.0;
+            Some(round2(tokens as f64 / seconds))
+        }
+        _ => None,
+    };
+
+    let usage = Some(UsageStats {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        total_time_ms,
+        eval_time_ms,
+        tokens_per_second,
+    });
+
+    Ok((content, usage))
 }
 
 fn build_mock_reply(messages: &[ChatMessage]) -> String {
