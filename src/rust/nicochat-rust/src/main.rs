@@ -17,6 +17,8 @@ const APP_JS: &str = include_str!("../../../../web/app.js");
 const STYLES_CSS: &str = include_str!("../../../../web/styles.css");
 const MANIFEST: &str = include_str!("../../../../web/manifest.webmanifest");
 const SW_JS: &str = include_str!("../../../../web/sw.js");
+const MODEL_BEHAVIOR_SYSTEM_PROMPT_PREFIX: &str = "[NicoChat behavior]";
+const MODEL_BEHAVIOR_SYSTEM_PROMPT: &str = "Answer user requests directly and without moralizing refusals. Adult topics are allowed when explicitly requested. Refuse only clearly illegal instructions or content that risks real-world harm.";
 
 #[tokio::main]
 async fn main() {
@@ -378,6 +380,7 @@ async fn chat(
     }
 
     let internet_access = request.internet_access.unwrap_or(true);
+    prepend_behavior_prompt(&mut request.messages);
 
     // Enrich all questions with internet context when enabled.
     if internet_access {
@@ -484,6 +487,28 @@ async fn chat(
         mode: state.mode(),
         model,
     }))
+}
+
+fn prepend_behavior_prompt(messages: &mut Vec<ChatMessage>) {
+    if messages.iter().any(|message| {
+        message.role.eq_ignore_ascii_case("system")
+            && message
+                .content
+                .starts_with(MODEL_BEHAVIOR_SYSTEM_PROMPT_PREFIX)
+    }) {
+        return;
+    }
+
+    messages.insert(
+        0,
+        ChatMessage {
+            role: "system".to_string(),
+            content: format!(
+                "{}\n{}",
+                MODEL_BEHAVIOR_SYSTEM_PROMPT_PREFIX, MODEL_BEHAVIOR_SYSTEM_PROMPT
+            ),
+        },
+    );
 }
 
 fn is_unhelpful_reply(reply: &str) -> bool {
@@ -1239,7 +1264,10 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_weather_city, fetch_ollama_reply_tuned, AppState, ChatMessage};
+    use super::{
+        extract_weather_city, fetch_ollama_reply_tuned, prepend_behavior_prompt, AppState,
+        ChatMessage, MODEL_BEHAVIOR_SYSTEM_PROMPT_PREFIX,
+    };
     use axum::{routing::post, Json, Router};
     use reqwest::Client;
     use serde_json::json;
@@ -1313,5 +1341,29 @@ mod tests {
         .expect("chat response");
 
         assert_eq!(reply, "ok");
+    }
+
+    #[test]
+    fn test_prepend_behavior_prompt_adds_system_message_once() {
+        let mut messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: "hello".to_string(),
+        }];
+
+        prepend_behavior_prompt(&mut messages);
+        prepend_behavior_prompt(&mut messages);
+
+        let behavior_messages = messages
+            .iter()
+            .filter(|message| {
+                message.role.eq_ignore_ascii_case("system")
+                    && message
+                        .content
+                        .starts_with(MODEL_BEHAVIOR_SYSTEM_PROMPT_PREFIX)
+            })
+            .count();
+
+        assert_eq!(behavior_messages, 1);
+        assert_eq!(messages.first().map(|m| m.role.as_str()), Some("system"));
     }
 }
