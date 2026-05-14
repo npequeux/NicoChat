@@ -1,13 +1,70 @@
 import json
+import os
+import shutil
+import subprocess
+import time
+from urllib.parse import urlparse
+
 import ollama
 from flask import Flask, Response, render_template, request, stream_with_context
 
 app = Flask(__name__)
 
 
+def _ollama_host():
+    host = os.environ.get("OLLAMA_HOST", "").strip()
+    if host:
+        return host
+
+    parsed = urlparse(os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434"))
+    if parsed.netloc:
+        return parsed.netloc
+
+    return "127.0.0.1:11434"
+
+
+def _ollama_available(host):
+    result = subprocess.run(
+        ["ollama", "list"],
+        env={**os.environ, "OLLAMA_HOST": host},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def ensure_ollama_running():
+    """Start Ollama automatically when not already available."""
+    if os.environ.get("NICOCHAT_USE_MOCK", "").lower() == "true":
+        return
+    if shutil.which("ollama") is None:
+        return
+
+    host = _ollama_host()
+    if _ollama_available(host):
+        return
+
+    subprocess.Popen(
+        ["ollama", "serve"],
+        env={**os.environ, "OLLAMA_HOST": host},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+    timeout = int(os.environ.get("OLLAMA_READY_TIMEOUT", "10"))
+    deadline = time.time() + max(timeout, 0)
+    while time.time() < deadline:
+        if _ollama_available(host):
+            return
+        time.sleep(1)
+
+
 def get_ollama_models():
     """Return list of locally available Ollama model names."""
     try:
+        ensure_ollama_running()
         response = ollama.list()
         return [m.model for m in response.models]
     except Exception:

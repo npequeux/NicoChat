@@ -67,6 +67,33 @@ class TestGetModels(unittest.TestCase):
             result = self.app_module.get_ollama_models()
             self.assertEqual(result, [])
 
+    def test_ensure_ollama_running_skips_in_mock_mode(self):
+        with patch.dict(
+            "os.environ",
+            {"NICOCHAT_USE_MOCK": "true"},
+            clear=False,
+        ), patch("shutil.which") as which_mock, patch("subprocess.Popen") as popen_mock:
+            self.app_module.ensure_ollama_running()
+            which_mock.assert_not_called()
+            popen_mock.assert_not_called()
+
+    def test_ensure_ollama_running_starts_ollama_when_unavailable(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "NICOCHAT_USE_MOCK": "false",
+                "OLLAMA_URL": "http://127.0.0.1:11434",
+                "OLLAMA_READY_TIMEOUT": "1",
+            },
+            clear=False,
+        ), patch("shutil.which", return_value="/usr/bin/ollama"), patch(
+            "subprocess.run",
+            side_effect=[MagicMock(returncode=1), MagicMock(returncode=0)],
+        ) as run_mock, patch("subprocess.Popen") as popen_mock, patch("time.sleep"):
+            self.app_module.ensure_ollama_running()
+            self.assertGreaterEqual(run_mock.call_count, 2)
+            popen_mock.assert_called_once()
+
 
 class TestIndexRoute(unittest.TestCase):
     """Tests for the / (index) route."""

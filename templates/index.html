@@ -267,6 +267,38 @@
     sendBtn.disabled = true;
   }
 
+  async function refreshModels() {
+    try {
+      const response = await fetch('/models');
+      const payload = await response.json();
+      const models = Array.isArray(payload.models) ? payload.models : [];
+      const previousModel = modelSelect.value;
+
+      modelSelect.innerHTML = '';
+      if (models.length === 0) {
+        modelSelect.innerHTML = '<option value="" disabled selected>No models found</option>';
+        noModelsWarning.style.display = 'block';
+        sendBtn.disabled = true;
+        return;
+      }
+
+      for (const modelName of models) {
+        const option = document.createElement('option');
+        option.value = modelName;
+        option.textContent = modelName;
+        modelSelect.appendChild(option);
+      }
+
+      if (previousModel && models.includes(previousModel)) {
+        modelSelect.value = previousModel;
+      }
+      noModelsWarning.style.display = 'none';
+      if (!isStreaming) sendBtn.disabled = false;
+    } catch (err) {
+      console.error('Failed to load models:', err);
+    }
+  }
+
   // Auto-grow textarea
   userInput.addEventListener('input', () => {
     userInput.style.height = 'auto';
@@ -283,6 +315,8 @@
 
   sendBtn.addEventListener('click', sendMessage);
   clearBtn.addEventListener('click', clearChat);
+  modelSelect.addEventListener('focus', refreshModels);
+  refreshModels();
 
   function appendMessage(role, content, streaming = false) {
     if (emptyState.parentNode) emptyState.remove();
