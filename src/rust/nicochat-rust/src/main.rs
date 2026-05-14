@@ -59,10 +59,6 @@ fn directory_contains_backend_keyword(path: &str, keyword: &str) -> bool {
     })
 }
 
-fn npu_backend_unavailable_message() -> String {
-    "NPU requested, but this Ollama installation does not include an OpenVINO/NPU backend. Install an OpenVINO-enabled Ollama build, then restart Ollama.".to_string()
-}
-
 fn gpu_backend_unavailable_message() -> String {
     "GPU requested, but this Ollama installation does not expose a usable GPU backend. Install a GPU-capable Ollama build (Vulkan or OpenVINO GPU) and verify /dev/dri access, then restart Ollama.".to_string()
 }
@@ -120,13 +116,6 @@ async fn restart_ollama_with_accel(payload: Option<RestartOllamaRequest>) -> imp
         .as_ref()
         .and_then(|p| select_effective_accelerator(p.accelerators.as_deref(), p.accelerator.as_deref()));
 
-    if matches!(selected.as_deref(), Some("npu")) && !ollama_supports_npu_backend() {
-        return (
-            StatusCode::BAD_REQUEST,
-            npu_backend_unavailable_message(),
-        );
-    }
-
     if matches!(selected.as_deref(), Some("gpu")) && !ollama_supports_gpu_backend() {
         return (
             StatusCode::BAD_REQUEST,
@@ -145,15 +134,9 @@ async fn restart_ollama_with_accel(payload: Option<RestartOllamaRequest>) -> imp
                     std::env::set_var("OLLAMA_VULKAN", "1");
                 }
             }
-            "npu" => {
-                // Best-effort: request oneAPI/OpenVINO backend if available.
-                unsafe {
-                    std::env::set_var("OLLAMA_LLM_LIBRARY", "openvino");
-                    std::env::remove_var("OLLAMA_VULKAN");
-                }
-            }
             _ => {
                 unsafe {
+                    std::env::remove_var("OLLAMA_LLM_LIBRARY");
                     std::env::remove_var("OLLAMA_VULKAN");
                 }
             }
@@ -170,11 +153,8 @@ async fn restart_ollama_with_accel(payload: Option<RestartOllamaRequest>) -> imp
                 cmd.env_remove("OLLAMA_LLM_LIBRARY");
                 cmd.env("OLLAMA_VULKAN", "1");
             }
-            "npu" => {
-                cmd.env("OLLAMA_LLM_LIBRARY", "openvino");
-                cmd.env_remove("OLLAMA_VULKAN");
-            }
             _ => {
+                cmd.env_remove("OLLAMA_LLM_LIBRARY");
                 cmd.env_remove("OLLAMA_VULKAN");
             }
         }
@@ -189,14 +169,9 @@ async fn restart_ollama_with_accel(payload: Option<RestartOllamaRequest>) -> imp
 fn select_effective_accelerator(accelerators: Option<&[String]>, fallback: Option<&str>) -> Option<String> {
     if let Some(values) = accelerators {
         let has_gpu = values.iter().any(|v| v.eq_ignore_ascii_case("gpu"));
-        let has_npu = values.iter().any(|v| v.eq_ignore_ascii_case("npu"));
 
-        // GPU/NPU are mutually exclusive. If both are present, GPU wins deterministically.
         if has_gpu {
             return Some("gpu".to_string());
-        }
-        if has_npu {
-            return Some("npu".to_string());
         }
         if values.iter().any(|v| v.eq_ignore_ascii_case("remote")) {
             return Some("remote".to_string());
@@ -205,7 +180,7 @@ fn select_effective_accelerator(accelerators: Option<&[String]>, fallback: Optio
 
     fallback
         .map(|value| value.trim().to_lowercase())
-        .filter(|value| value == "gpu" || value == "npu" || value == "remote")
+        .filter(|value| value == "gpu" || value == "remote")
 }
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
@@ -393,13 +368,9 @@ fn select_effective_accelerator_for_chat(
 ) -> Option<String> {
     if let Some(values) = accelerators {
         let has_gpu = values.iter().any(|v| v.eq_ignore_ascii_case("gpu"));
-        let has_npu = values.iter().any(|v| v.eq_ignore_ascii_case("npu"));
 
         if has_gpu {
             return Some("gpu".to_string());
-        }
-        if has_npu {
-            return Some("npu".to_string());
         }
         if values.iter().any(|v| v.eq_ignore_ascii_case("remote")) {
             return Some("remote".to_string());
@@ -408,7 +379,7 @@ fn select_effective_accelerator_for_chat(
 
     fallback
         .map(|value| value.trim().to_lowercase())
-        .filter(|value| value == "gpu" || value == "npu" || value == "remote")
+        .filter(|value| value == "gpu" || value == "remote")
 }
 
 async fn chat(
@@ -448,10 +419,6 @@ async fn chat(
         request.accelerators.as_deref(),
         request.accelerator.as_deref(),
     );
-
-    if matches!(chosen_accel.as_deref(), Some("npu")) && !ollama_supports_npu_backend() {
-        return Err(service_unavailable(npu_backend_unavailable_message()));
-    }
 
     if matches!(chosen_accel.as_deref(), Some("gpu")) && !ollama_supports_gpu_backend() {
         return Err(service_unavailable(gpu_backend_unavailable_message()));

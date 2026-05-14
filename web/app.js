@@ -13,7 +13,6 @@ const importDocumentButton = document.getElementById("importDocumentButton");
 const importDocumentInput = document.getElementById("importDocumentInput");
 
 const gpuToggle = document.getElementById("gpuToggle");
-const npuToggle = document.getElementById("npuToggle");
 const remoteToggle = document.getElementById("remoteToggle");
 
 const ollamaRestartNotice = document.getElementById("ollamaRestartNotice");
@@ -22,7 +21,6 @@ const restartOllamaStatus = document.getElementById("restartOllamaStatus");
 
 const acceleratorButtons = [
   { id: "gpu", element: gpuToggle },
-  { id: "npu", element: npuToggle },
   { id: "remote", element: remoteToggle },
 ];
 
@@ -241,11 +239,9 @@ function getAccelerators() {
 }
 
 function normalizeAccelerators(values) {
+  const allowed = new Set(["gpu", "remote"]);
   const unique = [...new Set(values)];
-  if (unique.includes("gpu") && unique.includes("npu")) {
-    return unique.filter((value) => value !== "npu");
-  }
-  return unique;
+  return unique.filter((value) => allowed.has(value));
 }
 
 function getInternetAccess() {
@@ -421,7 +417,7 @@ function setupControls() {
     });
   }
 
-  let savedAccelerators = ["gpu", "npu", "remote"];
+  let savedAccelerators = ["gpu", "remote"];
   try {
     const value = JSON.parse(window.localStorage.getItem("nicochat-accelerators") || "null");
     if (Array.isArray(value) && value.length > 0) {
@@ -438,14 +434,6 @@ function setupControls() {
     if (!button.element) return;
     button.element.addEventListener("click", () => {
       button.element.classList.toggle("active");
-
-      // GPU and NPU are mutually exclusive.
-      if (button.id === "gpu" && button.element.classList.contains("active") && npuToggle) {
-        npuToggle.classList.remove("active");
-      }
-      if (button.id === "npu" && button.element.classList.contains("active") && gpuToggle) {
-        gpuToggle.classList.remove("active");
-      }
 
       const active = getAccelerators();
       window.localStorage.setItem("nicochat-accelerators", JSON.stringify(active));
