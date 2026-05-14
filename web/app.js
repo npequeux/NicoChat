@@ -7,6 +7,7 @@ const sendButton = document.getElementById("sendButton");
 const modelSelect = document.getElementById("modelSelect");
 const historyLengthInput = document.getElementById("historyLengthInput");
 const speedModeSelect = document.getElementById("speedModeSelect");
+const roleSelect = document.getElementById("roleSelect");
 const internetAccessToggle = document.getElementById("internetAccessToggle");
 const importDocumentButton = document.getElementById("importDocumentButton");
 const importDocumentInput = document.getElementById("importDocumentInput");
@@ -318,6 +319,18 @@ function getSpeedMode() {
   return speedModeSelect?.value || "balanced";
 }
 
+const ROLE_SYSTEM_PROMPTS = {
+  default: "You are a cool companion ready to help.",
+  psychologist: "You are a supportive psychologist. You listen carefully, show empathy, and provide thoughtful, supportive guidance.",
+  geek: "You are a tech enthusiast who knows all the latest fancy geek stuff. You love talking about technology, programming, gadgets, and cutting-edge innovations.",
+};
+
+function getRoleSystemMessage() {
+  const role = roleSelect?.value || "default";
+  const prompt = ROLE_SYSTEM_PROMPTS[role] || ROLE_SYSTEM_PROMPTS.default;
+  return { role: "system", content: prompt };
+}
+
 function getAccelerators() {
   return acceleratorButtons
     .filter((button) => button.element && button.element.classList.contains("active"))
@@ -460,6 +473,16 @@ function setupControls() {
     });
   }
 
+  if (roleSelect) {
+    const savedRole = window.localStorage.getItem("nicochat-role");
+    if (savedRole && ROLE_SYSTEM_PROMPTS[savedRole]) {
+      roleSelect.value = savedRole;
+    }
+    roleSelect.addEventListener("change", () => {
+      window.localStorage.setItem("nicochat-role", roleSelect.value);
+    });
+  }
+
   if (modelSelect) {
     modelSelect.addEventListener("change", () => {
       window.localStorage.setItem("nicochat-model", modelSelect.value);
@@ -579,13 +602,14 @@ if (form) {
       const accelerators = getAccelerators();
       const accelerator = accelerators[0] || null;
       const internetAccess = getInternetAccess();
+      const roleSystemMessage = getRoleSystemMessage();
 
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model,
-          messages: requestMessages,
+          messages: [roleSystemMessage, ...requestMessages],
           speed_mode: speedMode,
           accelerator,
           accelerators,
