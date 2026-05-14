@@ -1,135 +1,70 @@
 # NicoChat
 
-NicoChat is a local-network chat interface for a locally hosted AI model. It ships multiple backend options and a web UI — all running fully offline.
+NicoChat is a local-network chat interface for a locally hosted AI model.
+The project is now simplified to a single Rust backend plus web UI.
 
 ## What is included
 
-- **Python/Flask backend** (`app.py`) — the simplest way to get started
-- **Selectable compiled backend**: choose `.NET` or `Rust` for a production-ready deployment
-- **Local-network web UI**: the server listens on `0.0.0.0` by default (compiled backends) or `127.0.0.1` (Python)
-- **Android client scaffold**: a lightweight WebView app that points to the local server
-- **Local AI integration**: all backends call a local [Ollama](https://ollama.com) instance — **no internet required**
-- **Model selection**: choose from any model you have pulled with Ollama
-- **Mock mode**: useful when validating the UI without a model installed
+- Rust backend (`axum` + `reqwest`) in `src/rust/nicochat-rust`
+- Web UI in `web/`
+- Android WebView scaffold in `android/`
+- Local AI integration via [Ollama](https://ollama.com)
 
----
-
-## Quick Start (Python)
-
-The fastest way to run NicoChat locally:
+## Quick Start
 
 ```bash
-# 1. Install Ollama and pull a model
+# 1. Start Ollama and install at least one model
 ollama serve
-ollama pull llama3          # or mistral, phi3, etc.
+ollama pull qwen3
 
-# 2. Install Python dependencies
-pip install -r requirements.txt
-
-# 3. Run the app
-python app.py
-# → http://127.0.0.1:5000
+# 2. Build and run NicoChat
+make build
+make run
 ```
 
-
-Select a model from the header dropdown list and start chatting. Responses stream in real time.
-
-**If the model list is empty:**
-- Run `ollama list` to see which models are installed locally.
-- If no models are listed, install one with `ollama pull llama3` (or another model).
-- Refresh the page after installing a model.
-
-**If you see a "model not found" or similar error:**
-- The backend and UI now provide clear, actionable error messages if a selected model is missing.
-- Follow the instructions in the error message (usually: run `ollama list` and select an available model from the dropdown).
-
-**Note:** NicoChat requires at least one model to be installed in Ollama. There is no fallback or default model—if none are available, the server and UI will prompt you to install one.
-
----
-
-## Compiled Backends (.NET / Rust)
-
-Build and run the compiled backend of your choice:
-
-```bash
-make build BACKEND=dotnet
-make run   BACKEND=dotnet
-# or
-make build BACKEND=rust
-make run   BACKEND=rust
-```
-
-`make run` now attempts to start the local Ollama service automatically when `NICOCHAT_USE_MOCK` is not enabled and the `ollama` CLI is installed.
-
-The UI is then available at:
+Server URL:
 
 ```text
-http://<your-machine-ip>:5000
+http://127.0.0.1:5000
 ```
 
----
-
+`make run` tries to start `ollama serve` automatically when mock mode is not enabled and the `ollama` CLI is installed.
 
 ## Runtime configuration
 
-Environment variables shared by all backends:
-
 - `OLLAMA_URL` (default: `http://127.0.0.1:11434`)
-- `OLLAMA_MODEL` (default: `qwen3`). If this model is not installed, you will be prompted to select an available model.
-- `NICOCHAT_USE_MOCK=true` — bypass Ollama and return deterministic mock replies
-- `PORT` — for the Rust backend
-- `ASPNETCORE_URLS` — for the .NET backend
-
----
+- `OLLAMA_MODEL` (default: `qwen3`)
+- `NICOCHAT_USE_MOCK=true` to bypass Ollama with deterministic mock replies
+- `PORT` (default: `5000`)
 
 ## Android app
 
-The `android/` folder contains a minimal Android client that opens the locally hosted NicoChat UI inside a WebView. On startup it now probes your local subnet for a reachable NicoChat instance (`/models` on port `5000`) and auto-loads the first match. You can still enter a LAN URL manually, for example:
+The `android/` folder contains a minimal Android client that opens the locally hosted NicoChat UI inside a WebView. On startup it probes your local subnet for a reachable NicoChat instance (`/api/models` on port `5000`, with `/models` fallback) and auto-loads the first match. You can still enter a LAN URL manually, for example:
 
 ```text
 http://192.168.1.20:5000
 ```
 
----
+Generate a debug APK from the repository root:
+
+```bash
+make android-apk
+```
 
 ## Project structure
 
-```
+```text
 NicoChat/
-├── app.py                    # Python/Flask backend
-├── requirements.txt          # Python dependencies
-├── templates/
-│   └── index.html            # Chat UI (Python backend)
-├── tests/
-│   └── test_app.py           # Python unit tests
-├── web/                      # Shared web UI (compiled backends)
+├── Makefile
 ├── src/
-│   ├── dotnet/               # .NET backend
-│   └── rust/                 # Rust backend
-├── android/                  # Android WebView client
-└── Makefile                  # Build & run helpers
+│   └── rust/
+│       └── nicochat-rust/
+├── web/
+└── android/
 ```
-
----
-
-## Running Python tests
-
-```bash
-pip install pytest
-pytest tests/
-```
-
----
 
 ## Troubleshooting
 
-- **Model list is empty:**
-	- Run `ollama list` to check for installed models.
-	- Install a model with `ollama pull llama3` (or another model).
-	- Refresh the page.
-- **Model not found error:**
-	- The selected model is not installed. Use the dropdown to select an available model, or install the missing one.
-- **Other backend errors:**
-	- The UI now displays clear error messages with suggested actions. Follow the instructions provided.
-
-If you encounter persistent issues, ensure that Ollama is running and at least one model is installed.
+- If model list is empty, run `ollama list` and install one with `ollama pull qwen3`.
+- If chat fails, verify Ollama is reachable with `ollama list`.
+- If port 5000 is busy, stop existing NicoChat process and retry `make run`.

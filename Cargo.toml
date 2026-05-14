@@ -1,0 +1,4 @@
+[workspace]
+members = ["src/rust/nicochat-rust"]
+default-members = ["src/rust/nicochat-rust"]
+resolver = "2"

@@ -23,10 +23,12 @@ class MainActivity : AppCompatActivity() {
         private const val SERVER_PORT = 5000
         private const val SCAN_THREAD_POOL_SIZE = 24
         private const val DETECTION_TIMEOUT_MS = 250
+        private val SERVER_HEALTH_ENDPOINTS = listOf("/api/models", "/models")
     }
 
     private lateinit var webView: WebView
     private val detectionExecutor = Executors.newSingleThreadExecutor()
+    @Volatile private var userConnectedManually = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,6 +49,7 @@ class MainActivity : AppCompatActivity() {
 
         connectButton.setOnClickListener {
             val url = normalizeUrl(addressInput.text.toString())
+            userConnectedManually = true
 
             preferences.edit().putString("server_url", url).apply()
             webView.loadUrl(url)
@@ -61,6 +64,9 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 runOnUiThread {
+                    if (userConnectedManually || isDestroyed || isFinishing) {
+                        return@runOnUiThread
+                    }
                     addressInput.setText(initialUrl)
                     preferences.edit().putString("server_url", initialUrl).apply()
                     webView.loadUrl(initialUrl)
@@ -162,20 +168,25 @@ class MainActivity : AppCompatActivity() {
 
     private fun isServerReachable(baseUrl: String): Boolean {
         val normalizedBase = normalizeUrl(baseUrl).removeSuffix("/")
-        val connection = (URL("$normalizedBase/models").openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = DETECTION_TIMEOUT_MS
-            readTimeout = DETECTION_TIMEOUT_MS
-            instanceFollowRedirects = true
-        }
+        for (endpoint in SERVER_HEALTH_ENDPOINTS) {
+            val connection = (URL("$normalizedBase$endpoint").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = DETECTION_TIMEOUT_MS
+                readTimeout = DETECTION_TIMEOUT_MS
+                instanceFollowRedirects = true
+            }
 
-        return try {
-            val code = connection.responseCode
-            code in 200..399
-        } catch (_: Exception) {
-            false
-        } finally {
-            connection.disconnect()
+            try {
+                val code = connection.responseCode
+                if (code in 200..399) {
+                    return true
+                }
+            } catch (_: Exception) {
+                // Continue with next endpoint candidate.
+            } finally {
+                connection.disconnect()
+            }
         }
+        return false
     }
 }
