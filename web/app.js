@@ -212,6 +212,16 @@ function getSpeedMode() {
   return speedModeSelect?.value || "balanced";
 }
 
+function syncDisplayedModel() {
+  const modelValueElement = document.getElementById("modelValue");
+  if (!modelValueElement) return;
+
+  const selectedModel = modelSelect?.value?.trim();
+  if (selectedModel) {
+    modelValueElement.textContent = selectedModel;
+  }
+}
+
 const ROLE_SYSTEM_PROMPTS = {
   default: "You are a cool companion ready to help.",
   psychologist: "You are a supportive psychologist. You listen carefully, show empathy, and provide thoughtful, supportive guidance.",
@@ -260,6 +270,7 @@ async function refreshHealth() {
   document.getElementById("backendValue").textContent = payload.backend;
   document.getElementById("modeValue").textContent = payload.mode;
   document.getElementById("modelValue").textContent = payload.model;
+  syncDisplayedModel();
   document.getElementById("acceleratorValue").textContent = payload.accelerator || "default";
 }
 
@@ -296,6 +307,8 @@ async function loadModels() {
     if (!modelSelect.value && modelSelect.options.length > 0) {
       modelSelect.selectedIndex = 0;
     }
+
+    syncDisplayedModel();
 
     sendButton.disabled = false;
   } catch (error) {
@@ -379,6 +392,7 @@ function setupControls() {
   if (modelSelect) {
     modelSelect.addEventListener("change", () => {
       window.localStorage.setItem("nicochat-model", modelSelect.value);
+      syncDisplayedModel();
     });
   }
 
