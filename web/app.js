@@ -68,7 +68,7 @@ function appendMessage(role, content, usage = null) {
 
   card.append(roleLabel, body);
 
-  if (usage && role === "assistant") {
+  if (usage && role === "assistant" && hasUsageData(usage)) {
     const usageLine = document.createElement("p");
     usageLine.className = "usage-meta";
     usageLine.textContent = formatUsage(usage);
@@ -95,15 +95,51 @@ function appendMessage(role, content, usage = null) {
 
 function normalizeMediaUrl(url) {
   if (!url) return null;
-  const cleaned = url.trim().replace(/[),.;!?]+$/, "");
+  const cleaned = url
+    .trim()
+    .replace(/[),.;!?]+$/, "")
+    .replace(/\s+/g, "");
   if (!cleaned.startsWith("http://") && !cleaned.startsWith("https://")) {
     return null;
   }
   return cleaned;
 }
 
+function resolveMediaSourceUrl(url) {
+  const normalized = normalizeMediaUrl(url);
+  if (!normalized) return null;
+
+  try {
+    const parsed = new URL(normalized);
+    const host = parsed.hostname.toLowerCase();
+
+    if (host.includes("external-content.duckduckgo.com") && parsed.pathname.startsWith("/iu/")) {
+      const original = parsed.searchParams.get("u");
+      const decoded = original ? decodeURIComponent(original) : null;
+      const cleanedDecoded = normalizeMediaUrl(decoded || "");
+      if (cleanedDecoded) {
+        return cleanedDecoded;
+      }
+    }
+  } catch (_) {
+    return normalized;
+  }
+
+  return normalized;
+}
+
 function classifyMediaUrl(url) {
   const lower = url.toLowerCase();
+
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (host.includes("external-content.duckduckgo.com")) {
+      return "image";
+    }
+  } catch (_) {
+    // Ignore malformed URLs.
+  }
 
   if (/\.(png|jpe?g|gif|webp|avif|svg)(\?.*)?$/.test(lower)) {
     return "image";
@@ -151,6 +187,22 @@ function extractMediaEmbeds(content) {
     found.push({ type: "image", url });
   }
 
+  const markdownLinkRegex = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/gi;
+  for (const match of text.matchAll(markdownLinkRegex)) {
+    const label = (match[1] || "").toLowerCase();
+    const url = normalizeMediaUrl(match[2]);
+    if (!url || seen.has(url)) continue;
+
+    let type = classifyMediaUrl(url);
+    if (!type && /(image|photo|picture|img)/.test(label)) {
+      type = "image";
+    }
+    if (!type) continue;
+
+    seen.add(url);
+    found.push({ type, url });
+  }
+
   const urlRegex = /https?:\/\/[^\s<>"]+/gi;
   for (const match of text.matchAll(urlRegex)) {
     const url = normalizeMediaUrl(match[0]);
@@ -181,21 +233,21 @@ function renderMediaEmbeds(items) {
     if (item.type === "image") {
       const img = document.createElement("img");
       img.className = "media-image";
-      img.src = item.url;
+      img.src = resolveMediaSourceUrl(item.url) || item.url;
       img.alt = "Assistant media image";
       img.loading = "lazy";
       card.append(img);
     } else if (item.type === "video") {
       const video = document.createElement("video");
       video.className = "media-video";
-      video.src = item.url;
+      video.src = resolveMediaSourceUrl(item.url) || item.url;
       video.controls = true;
       video.preload = "metadata";
       card.append(video);
     } else if (item.type === "audio") {
       const audio = document.createElement("audio");
       audio.className = "media-audio";
-      audio.src = item.url;
+      audio.src = resolveMediaSourceUrl(item.url) || item.url;
       audio.controls = true;
       card.append(audio);
     } else if (item.type === "youtube") {
@@ -543,6 +595,16 @@ function formatUsage(usage) {
     parts.push(`${Number(usage.tokens_per_second).toFixed(1)} tok/s`);
   }
   return parts.length > 0 ? parts.join(" · ") : "usage unavailable";
+}
+
+function hasUsageData(usage) {
+  return [
+    usage?.total_tokens,
+    usage?.prompt_tokens,
+    usage?.completion_tokens,
+    usage?.total_time_ms,
+    usage?.tokens_per_second,
+  ].some((value) => Number.isFinite(value));
 }
 
 function getRoleSystemMessage() {

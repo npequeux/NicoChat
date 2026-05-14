@@ -400,6 +400,14 @@ async fn chat(
         .unwrap_or(&state.model)
         .to_string();
 
+    let latest_user_content = request
+        .messages
+        .iter()
+        .rev()
+        .find(|message| message.role.eq_ignore_ascii_case("user") && !message.content.trim().is_empty())
+        .map(|message| message.content.clone())
+        .unwrap_or_default();
+
 
     // Speed mode tuning
     let (temperature, top_p, top_k, repeat_penalty, max_tokens) = match request.speed_mode.as_deref() {
@@ -533,6 +541,40 @@ async fn chat(
         }
     }
 
+    if internet_access && is_image_request(&latest_user_content) {
+        let image_query = build_image_search_query(&request.messages, &latest_user_content);
+        let has_media_in_model_reply = response_contains_media_url(&content);
+        let fetched_urls = if let Some(urls) = fetch_wikimedia_image_urls(&state.client, &image_query, 3).await {
+            Some(urls)
+        } else {
+            fetch_wikipedia_image_urls(&state.client, &image_query, 3).await
+        };
+
+        if let Some(image_urls) = fetched_urls {
+            if !image_urls.is_empty() {
+                let media_block = image_urls
+                    .iter()
+                    .map(|url| format!("- ![]({url})"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                if is_unhelpful_reply(&content) || !has_media_in_model_reply {
+                    content = format!(
+                        "Voici des images pour \"{}\":\n{}",
+                        image_query,
+                        media_block
+                    );
+                } else {
+                    content = format!(
+                        "{}\n\nSources image verifiees:\n{}",
+                        content,
+                        media_block
+                    );
+                }
+            }
+        }
+    }
+
     Ok(Json(ChatReply {
         role: "assistant",
         content,
@@ -548,6 +590,207 @@ fn nanos_to_ms(value: Option<u64>) -> Option<u64> {
 
 fn round2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
+}
+
+fn is_image_request(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("photo")
+        || lower.contains("image")
+        || lower.contains("picture")
+        || lower.contains("pic")
+        || lower.contains("montre moi")
+        || lower.contains("show me")
+}
+
+fn response_contains_media_url(text: &str) -> bool {
+    let Ok(url_regex) = Regex::new(r"https?://\S+") else {
+        return false;
+    };
+
+    url_regex.find_iter(text).any(|m| {
+        let url = m.as_str().to_lowercase();
+        url.ends_with(".png")
+            || url.ends_with(".jpg")
+            || url.ends_with(".jpeg")
+            || url.ends_with(".webp")
+            || url.ends_with(".gif")
+            || url.contains("youtube.com/watch")
+            || url.contains("youtu.be/")
+            || url.ends_with(".mp4")
+            || url.ends_with(".webm")
+            || url.ends_with(".mp3")
+    })
+}
+
+fn sanitize_image_query(raw: &str) -> String {
+    let cleaned = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_alphanumeric() || ch.is_whitespace() || ch == '-' || ch == '_' || ch == '\'' {
+                ch
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>();
+
+    cleaned
+        .split_whitespace()
+        .take(12)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn strip_image_request_words(text: &str) -> String {
+    let mut out = text.to_string();
+    let patterns = [
+        r"(?i)montre\s*moi",
+        r"(?i)peux[-\s]*tu\s*montrer",
+        r"(?i)show\s*me",
+        r"(?i)une?\s+photo\s+de",
+        r"(?i)des?\s+photos\s+de",
+        r"(?i)une?\s+image\s+de",
+        r"(?i)des?\s+images\s+de",
+        r"(?i)photo\s+de",
+        r"(?i)image\s+de",
+    ];
+
+    for pat in patterns {
+        if let Ok(re) = Regex::new(pat) {
+            out = re.replace_all(&out, " ").to_string();
+        }
+    }
+
+    sanitize_image_query(out.trim())
+}
+
+fn build_image_search_query(messages: &[ChatMessage], latest_user: &str) -> String {
+    let stripped = strip_image_request_words(latest_user);
+    let lower = stripped.to_lowercase();
+
+    let refers_pronoun = stripped.is_empty()
+        || lower == "lui"
+        || lower == "elle"
+        || lower == "him"
+        || lower == "her"
+        || lower == "them";
+
+    if !refers_pronoun {
+        return format!("{} portrait photo", stripped);
+    }
+
+    if let Some(previous_user) = messages
+        .iter()
+        .rev()
+        .filter(|m| m.role.eq_ignore_ascii_case("user"))
+        .map(|m| m.content.trim())
+        .find(|content| !content.is_empty() && *content != latest_user)
+    {
+        let inferred = sanitize_image_query(previous_user);
+        if !inferred.is_empty() {
+            return format!("{} portrait photo", inferred);
+        }
+    }
+
+    "portrait person photo".to_string()
+}
+
+async fn fetch_wikimedia_image_urls(client: &Client, query: &str, limit: usize) -> Option<Vec<String>> {
+    let cleaned_query = sanitize_image_query(query);
+    if cleaned_query.is_empty() {
+        return None;
+    }
+
+    let encoded_query = cleaned_query.split_whitespace().collect::<Vec<_>>().join("+");
+    let gsr_limit = limit.clamp(1, 8);
+    let url = format!(
+        "https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch={encoded_query}&gsrnamespace=6&gsrlimit={gsr_limit}&prop=imageinfo&iiprop=url&format=json"
+    );
+
+    let response = client.get(url).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let payload: serde_json::Value = response.json().await.ok()?;
+    let pages = payload
+        .get("query")
+        .and_then(|q| q.get("pages"))
+        .and_then(|p| p.as_object())?;
+
+    let mut urls = Vec::new();
+    for page in pages.values() {
+        let maybe_url = page
+            .get("imageinfo")
+            .and_then(|info| info.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|entry| entry.get("url"))
+            .and_then(|u| u.as_str())
+            .map(|u| u.trim().to_string());
+
+        if let Some(url) = maybe_url {
+            if url.starts_with("http://") || url.starts_with("https://") {
+                urls.push(url);
+            }
+        }
+        if urls.len() >= gsr_limit {
+            break;
+        }
+    }
+
+    if urls.is_empty() {
+        None
+    } else {
+        Some(urls)
+    }
+}
+
+async fn fetch_wikipedia_image_urls(client: &Client, query: &str, limit: usize) -> Option<Vec<String>> {
+    let cleaned_query = sanitize_image_query(query);
+    if cleaned_query.is_empty() {
+        return None;
+    }
+
+    let encoded_query = cleaned_query.split_whitespace().collect::<Vec<_>>().join("+");
+    let search_limit = limit.clamp(1, 8);
+    let url = format!(
+        "https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch={encoded_query}&gsrlimit={search_limit}&prop=pageimages&piprop=thumbnail&pithumbsize=1200&format=json"
+    );
+
+    let response = client.get(url).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let payload: serde_json::Value = response.json().await.ok()?;
+    let pages = payload
+        .get("query")
+        .and_then(|q| q.get("pages"))
+        .and_then(|p| p.as_object())?;
+
+    let mut urls = Vec::new();
+    for page in pages.values() {
+        let maybe_url = page
+            .get("thumbnail")
+            .and_then(|t| t.get("source"))
+            .and_then(|s| s.as_str())
+            .map(|s| s.trim().to_string());
+
+        if let Some(url) = maybe_url {
+            if url.starts_with("http://") || url.starts_with("https://") {
+                urls.push(url);
+            }
+        }
+        if urls.len() >= search_limit {
+            break;
+        }
+    }
+
+    if urls.is_empty() {
+        None
+    } else {
+        Some(urls)
+    }
 }
 
 fn is_unhelpful_reply(reply: &str) -> bool {
