@@ -5,6 +5,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -201,7 +202,7 @@ async fn models(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
 async fn chat(
     State(state): State<Arc<AppState>>,
-    Json(request): Json<ChatRequest>,
+    Json(mut request): Json<ChatRequest>,
 ) -> Result<Json<ChatReply>, (StatusCode, Json<ErrorResponse>)> {
     if request.messages.is_empty() {
         return Err(bad_request("Please send at least one message."));
@@ -244,11 +245,57 @@ async fn chat(
     }
 
     let internet_access = request.internet_access.unwrap_or(true);
-    let content = if state.use_mock {
+    let mut content = if state.use_mock {
         build_mock_reply(&request.messages)
     } else {
         fetch_ollama_reply_tuned(&state, &request.messages, &model, temperature, top_p, top_k, repeat_penalty, max_tokens, internet_access).await?
     };
+
+    // Fallback: if the first answer is unhelpful, enrich context from internet and retry once.
+    if internet_access && is_unhelpful_reply(&content) {
+        if let Some(user_message) = request
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role.eq_ignore_ascii_case("user"))
+        {
+            if let Some(internet_context) = try_fetch_relevant_context(&state.client, &user_message.content).await {
+                let insert_index = request
+                    .messages
+                    .iter()
+                    .rposition(|message| message.role.eq_ignore_ascii_case("user"))
+                    .unwrap_or(0);
+
+                request.messages.insert(
+                    insert_index,
+                    ChatMessage {
+                        role: "system".to_string(),
+                        content: format!(
+                            "[Internet context for better answer]\n{}",
+                            internet_context
+                        ),
+                    },
+                );
+
+                content = if state.use_mock {
+                    build_mock_reply(&request.messages)
+                } else {
+                    fetch_ollama_reply_tuned(
+                        &state,
+                        &request.messages,
+                        &model,
+                        temperature,
+                        top_p,
+                        top_k,
+                        repeat_penalty,
+                        max_tokens,
+                        internet_access,
+                    )
+                    .await?
+                };
+            }
+        }
+    }
 
     Ok(Json(ChatReply {
         role: "assistant",
@@ -256,6 +303,96 @@ async fn chat(
         mode: state.mode(),
         model,
     }))
+}
+
+fn is_unhelpful_reply(reply: &str) -> bool {
+    let lower = reply.trim().to_lowercase();
+    lower.is_empty()
+        || lower.contains("i don't know")
+        || lower.contains("i am not sure")
+        || lower.contains("i'm not sure")
+        || lower.contains("i cannot")
+        || lower.contains("i can't")
+        || lower.contains("not enough information")
+}
+
+async fn try_fetch_relevant_context(client: &Client, user_content: &str) -> Option<String> {
+    if let Some(url) = extract_first_url(user_content) {
+        return fetch_url_snippet(client, url).await;
+    }
+    fetch_search_snippet(client, user_content).await
+}
+
+fn extract_first_url(text: &str) -> Option<&str> {
+    let regex = Regex::new(r"https?://\\S+").ok()?;
+    regex.find(text).map(|m| m.as_str())
+}
+
+async fn fetch_url_snippet(client: &Client, url: &str) -> Option<String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return None;
+    }
+
+    let response = client.get(url).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let text = response.text().await.ok()?;
+    let snippet = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .take(12)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    if snippet.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "Source: {}\\nSnippet: {}",
+            url,
+            snippet.chars().take(1200).collect::<String>()
+        ))
+    }
+}
+
+async fn fetch_search_snippet(client: &Client, query: &str) -> Option<String> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let encoded_query = trimmed.split_whitespace().collect::<Vec<_>>().join("+");
+    let url = format!(
+        "https://api.duckduckgo.com/?q={}&format=json&no_html=1&skip_disambig=1",
+        encoded_query
+    );
+
+    let response = client.get(url).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let payload: serde_json::Value = response.json().await.ok()?;
+    let abstract_text = payload
+        .get("AbstractText")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let heading = payload
+        .get("Heading")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+
+    if abstract_text.is_empty() {
+        None
+    } else if heading.is_empty() {
+        Some(format!("Search context: {}", abstract_text))
+    } else {
+        Some(format!("Search context ({}): {}", heading, abstract_text))
+    }
 }
 
 async fn fetch_ollama_reply_tuned(
