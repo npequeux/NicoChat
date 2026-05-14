@@ -722,6 +722,11 @@ fn sanitize_city_candidate(raw: &str) -> Option<String> {
             lower.as_str(),
             "like"
                 | "today"
+                | "aujourd'hui"
+                | "aujourdhui"
+                | "demain"
+                | "tomorrow"
+                | "tonight"
                 | "now"
                 | "please"
                 | "currently"
@@ -741,10 +746,30 @@ fn sanitize_city_candidate(raw: &str) -> Option<String> {
     }
 
     if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(" "))
+        return None;
     }
+
+    if parts.len() == 1 {
+        let lower = parts[0].to_lowercase();
+        let is_question_word = matches!(
+            lower.as_str(),
+            "what"
+                | "where"
+                | "how"
+                | "which"
+                | "quel"
+                | "quelle"
+                | "quels"
+                | "quelles"
+                | "ou"
+                | "où"
+        );
+        if is_question_word {
+            return None;
+        }
+    }
+
+    Some(parts.join(" "))
 }
 
 async fn geocode_city(client: &Client, city: &str) -> Option<OpenMeteoGeocodeItem> {
@@ -1186,5 +1211,28 @@ impl AppState {
         } else {
             "ollama"
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_weather_city;
+
+    #[test]
+    fn test_extract_weather_city_no_city_provided() {
+        assert_eq!(extract_weather_city("Quelle meteo aujourd'hui ?"), None);
+        assert_eq!(extract_weather_city("weather today"), None);
+    }
+
+    #[test]
+    fn test_extract_weather_city_with_city_provided() {
+        assert_eq!(
+            extract_weather_city("meteo a Bruxelles aujourd'hui"),
+            Some("Bruxelles".to_string())
+        );
+        assert_eq!(
+            extract_weather_city("weather in New York"),
+            Some("New York".to_string())
+        );
     }
 }
