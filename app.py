@@ -53,12 +53,12 @@ def ensure_ollama_running():
         start_new_session=True,
     )
 
-    timeout = int(os.environ.get("OLLAMA_READY_TIMEOUT", "10"))
-    deadline = time.time() + max(timeout, 0)
-    while time.time() < deadline:
+    timeout = max(int(os.environ.get("OLLAMA_READY_TIMEOUT", "10")), 0)
+    for attempt in range(timeout + 1):
         if _ollama_available(host):
             return
-        time.sleep(1)
+        if attempt < timeout:
+            time.sleep(1)
 
 
 def get_ollama_models():

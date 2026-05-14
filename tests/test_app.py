@@ -91,7 +91,7 @@ class TestGetModels(unittest.TestCase):
             side_effect=[MagicMock(returncode=1), MagicMock(returncode=0)],
         ) as run_mock, patch("subprocess.Popen") as popen_mock, patch("time.sleep"):
             self.app_module.ensure_ollama_running()
-            self.assertGreaterEqual(run_mock.call_count, 2)
+            self.assertEqual(run_mock.call_count, 2)
             popen_mock.assert_called_once()
 
 
