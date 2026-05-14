@@ -25,11 +25,11 @@ src/dotnet/NicoChat.DotNet/obj/
 
 # Rust
 src/rust/nicochat-rust/target/
-target/
-target/*/
-target/*/*/
-target/*/*/*/
-target/*/*/*/*/
+target/*
+target/*/*
+target/*/*/*
+target/*/*/*/*
+target/*/*/*/*/*
 
 # Android
 android/.gradle/
