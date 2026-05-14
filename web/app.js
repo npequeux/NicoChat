@@ -122,10 +122,9 @@ function renderReplyToPng(content) {
     lines.push(currentLine);
   }
 
-  const textWidth = Math.min(
-    maxTextWidth,
-    Math.max(...lines.map((line) => ctx.measureText(line || " ").width), 0)
-  );
+  const measuredLineWidths = lines.map((line) => ctx.measureText(line || " ").width);
+  const widestLine = measuredLineWidths.length > 0 ? Math.max(...measuredLineWidths) : 0;
+  const textWidth = Math.min(maxTextWidth, widestLine);
   canvas.width = Math.ceil(textWidth + padding * 2);
   canvas.height = Math.max(120, Math.ceil(lines.length * lineHeight + padding * 2));
 
