@@ -238,7 +238,18 @@ async fn fetch_ollama_reply(
         }))
         .send()
         .await
-        .map_err(|error| service_unavailable(format!("Unable to reach local Ollama instance: {error}")))?;
+        .map_err(|error| {
+            let detail = if error.is_connect() || error.is_timeout() {
+                format_ollama_unavailable_message(&state.ollama_url)
+            } else {
+                format!(
+                    "{} Additional detail: {}",
+                    format_ollama_unavailable_message(&state.ollama_url),
+                    error
+                )
+            };
+            service_unavailable(detail)
+        })?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -306,6 +317,13 @@ fn service_unavailable(message: String) -> (StatusCode, Json<ErrorResponse>) {
     (
         StatusCode::SERVICE_UNAVAILABLE,
         Json(ErrorResponse { error: message }),
+    )
+}
+
+fn format_ollama_unavailable_message(ollama_url: &str) -> String {
+    format!(
+        "Unable to reach local Ollama instance at {}. Start it with 'ollama serve', verify connectivity with 'ollama list', or set NICOCHAT_USE_MOCK=true.",
+        ollama_url
     )
 }
 

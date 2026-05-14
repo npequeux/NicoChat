@@ -21,6 +21,21 @@ function appendMessage(role, content) {
   messagesElement.scrollTop = messagesElement.scrollHeight;
 }
 
+function formatChatError(error) {
+  const raw = error instanceof Error ? error.message : "Unknown error";
+  const normalized = raw.toLowerCase();
+
+  if (
+    normalized.includes("unable to reach local ollama") ||
+    normalized.includes("connection refused") ||
+    normalized.includes("127.0.0.1:11434")
+  ) {
+    return "Local Ollama is unavailable. Start it with 'ollama serve', check models with 'ollama list', then try again. You can also run with NICOCHAT_USE_MOCK=true.";
+  }
+
+  return `Unable to respond: ${raw}`;
+}
+
 async function refreshHealth() {
   const response = await fetch("/api/health");
   const payload = await response.json();
@@ -93,10 +108,7 @@ form.addEventListener("submit", async (event) => {
     appendMessage(payload.role, payload.content);
     await refreshHealth();
   } catch (error) {
-    appendMessage(
-      "assistant",
-      `Unable to respond: ${error instanceof Error ? error.message : "Unknown error"}`
-    );
+    appendMessage("assistant", formatChatError(error));
   } finally {
     sendButton.disabled = false;
     input.focus();

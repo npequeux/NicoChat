@@ -309,6 +309,21 @@
     statusBar.textContent = msg;
   }
 
+  function friendlyChatError(message) {
+    const raw = message || 'Unknown error';
+    const normalized = raw.toLowerCase();
+
+    if (
+      normalized.includes('unable to reach local ollama') ||
+      normalized.includes('error sending request for url') ||
+      normalized.includes('connection refused')
+    ) {
+      return "Local Ollama is unavailable. Run 'ollama serve', verify models with 'ollama list', then retry. You can also use NICOCHAT_USE_MOCK=true.";
+    }
+
+    return raw;
+  }
+
   async function sendMessage() {
     const text = userInput.value.trim();
     if (!text || isStreaming) return;
@@ -366,7 +381,7 @@
           try {
             const parsed = JSON.parse(payload);
             if (parsed.error) {
-              bubble.textContent = '\u26A0 ' + parsed.error;
+              bubble.textContent = '\u26A0 ' + friendlyChatError(parsed.error);
               bubble.classList.remove('typing');
             } else if (parsed.content) {
               fullContent += parsed.content;
@@ -379,7 +394,7 @@
         }
       }
     } catch (err) {
-      bubble.textContent = '\u26A0 Network error: ' + err.message;
+      bubble.textContent = '\u26A0 ' + friendlyChatError(err.message);
     } finally {
       bubble.classList.remove('typing');
       if (fullContent) {

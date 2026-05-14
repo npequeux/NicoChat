@@ -5,6 +5,25 @@ from flask import Flask, Response, render_template, request, stream_with_context
 app = Flask(__name__)
 
 
+def _format_ollama_error(exc: Exception) -> str:
+    """Return an actionable client-facing error for Ollama failures."""
+    raw = str(exc)
+    normalized = raw.lower()
+
+    if (
+        "error sending request for url" in normalized
+        or "connection refused" in normalized
+        or "127.0.0.1:11434" in normalized
+    ):
+        return (
+            "Unable to reach local Ollama instance at http://127.0.0.1:11434. "
+            "Start it with 'ollama serve', verify with 'ollama list', "
+            "or run in mock mode using NICOCHAT_USE_MOCK=true."
+        )
+
+    return raw
+
+
 def get_ollama_models():
     """Return list of locally available Ollama model names."""
     try:
@@ -46,9 +65,9 @@ def chat():
                 if content:
                     yield f"data: {json.dumps({'content': content})}\n\n"
         except ollama.ResponseError as exc:
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            yield f"data: {json.dumps({'error': _format_ollama_error(exc)})}\n\n"
         except Exception as exc:
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            yield f"data: {json.dumps({'error': _format_ollama_error(exc)})}\n\n"
         yield "data: [DONE]\n\n"
 
     return Response(

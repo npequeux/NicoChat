@@ -54,7 +54,7 @@ app.MapPost("/api/chat", async Task<IResult> (ChatRequest request, ChatGateway g
     {
         return Results.Problem(
             title: "Local AI backend unavailable",
-            detail: exception.Message,
+            detail: gateway.ToClientErrorMessage(exception),
             statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 });
@@ -70,6 +70,23 @@ sealed class ChatGateway(HttpClient httpClient)
     public string Backend => ".NET";
     public string Model { get; } = Environment.GetEnvironmentVariable("OLLAMA_MODEL") ?? "qwen3";
     public string Mode => _useMock ? "mock" : "ollama";
+
+    public string ToClientErrorMessage(HttpRequestException? exception = null)
+    {
+        if (_useMock)
+        {
+            return "Mock mode is enabled.";
+        }
+
+        if (exception?.StatusCode is HttpStatusCode statusCode)
+        {
+            return $"Local Ollama request failed ({(int)statusCode} {statusCode}). " +
+                   $"Verify OLLAMA_URL ({_ollamaUrl}) and ensure the selected model is installed.";
+        }
+
+        return $"Unable to reach local Ollama instance at {_ollamaUrl}. " +
+               "Start it with 'ollama serve', verify connectivity with 'ollama list', or set NICOCHAT_USE_MOCK=true.";
+    }
 
     public async Task<IReadOnlyList<string>> GetModelsAsync(CancellationToken cancellationToken)
     {
