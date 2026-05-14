@@ -422,7 +422,6 @@ async fn chat(
             top_k,
             repeat_penalty,
             max_tokens,
-            internet_access,
             chosen_accel.as_deref(),
         )
         .await?
@@ -466,7 +465,6 @@ async fn chat(
                         top_k,
                         repeat_penalty,
                         max_tokens,
-                        internet_access,
                         chosen_accel.as_deref(),
                     )
                     .await?
@@ -1109,7 +1107,6 @@ async fn fetch_ollama_reply_tuned(
     top_k: u32,
     repeat_penalty: f32,
     max_tokens: u32,
-    _internet_access: bool,
     accelerator: Option<&str>,
 ) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
     let normalized_messages = messages
@@ -1275,6 +1272,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_ollama_reply_tuned_allows_url_when_internet_toggle_off() {
+        let model = "qwen3";
         let app = Router::new().route(
             "/api/chat",
             post(|| async { Json(json!({ "message": { "content": "ok" } })) }),
@@ -1291,7 +1289,7 @@ mod tests {
         let state = AppState {
             client: Client::new(),
             ollama_url: format!("http://{}", address),
-            model: "qwen3".to_string(),
+            model: model.to_string(),
             use_mock: false,
         };
 
@@ -1303,13 +1301,12 @@ mod tests {
         let reply = fetch_ollama_reply_tuned(
             &state,
             &messages,
-            "qwen3",
+            model,
             0.5,
             0.95,
             20,
             1.0,
             64,
-            false,
             None,
         )
         .await
