@@ -69,7 +69,7 @@ function appendMessage(role, content) {
 }
 
 function makeDownloadFileName(prefix, extension) {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const timestamp = new Date().toISOString().replace(/[T:.Z]/g, "-");
   return `nicochat-${prefix}-${timestamp}.${extension}`;
 }
 
@@ -171,19 +171,20 @@ function createReplyExportActions(content) {
 }
 
 function importDocumentToComposer(file) {
-  if (!file || !input) return;
+  const messageInput = document.getElementById("messageInput");
+  if (!file || !messageInput) return;
 
   const reader = new FileReader();
   reader.onload = () => {
     const text = typeof reader.result === "string" ? reader.result : "";
     const importBlock = `[Imported document: ${file.name}]\n${text.trim()}`;
-    input.value = input.value.trim()
-      ? `${input.value.trim()}\n\n${importBlock}`
+    messageInput.value = messageInput.value.trim()
+      ? `${messageInput.value.trim()}\n\n${importBlock}`
       : importBlock;
-    input.focus();
+    messageInput.focus();
   };
   reader.onerror = () => {
-    appendMessage("assistant", "Unable to import this document.");
+    appendMessage("assistant", "Unable to import this document. Please use a valid text-based file.");
   };
   reader.readAsText(file);
 }
