@@ -24,6 +24,8 @@ const acceleratorButtons = [
   { id: "remote", element: remoteToggle },
 ];
 
+let thinkingMessageCard = null;
+
 if (input) {
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -226,10 +228,57 @@ const ROLE_SYSTEM_PROMPTS = {
   geek: "You are a tech enthusiast who knows all the latest fancy geek stuff. You love talking about technology, programming, gadgets, and cutting-edge innovations.",
 };
 
+const DEFAULT_BREVITY_INSTRUCTION =
+  "Default response style: reply in at most 3 sentences when possible. If the user explicitly asks for more detail, you can provide a longer answer.";
+
 function getRoleSystemMessage() {
   const role = roleSelect?.value || "default";
   const prompt = ROLE_SYSTEM_PROMPTS[role] || ROLE_SYSTEM_PROMPTS.default;
-  return { role: "system", content: prompt };
+  return { role: "system", content: `${prompt}\n\n${DEFAULT_BREVITY_INSTRUCTION}` };
+}
+
+function showThinkingIndicator() {
+  if (!messagesElement || thinkingMessageCard) return;
+
+  const card = document.createElement("article");
+  card.className = "message assistant thinking-message";
+
+  const roleLabel = document.createElement("p");
+  roleLabel.className = "role";
+  roleLabel.textContent = "assistant";
+
+  const row = document.createElement("div");
+  row.className = "thinking-row";
+
+  const orbit = document.createElement("div");
+  orbit.className = "thinking-orbit";
+  orbit.setAttribute("aria-hidden", "true");
+
+  const orb = document.createElement("span");
+  orb.className = "thinking-orb";
+  orbit.append(orb);
+
+  const text = document.createElement("p");
+  text.className = "thinking-text";
+  text.textContent = "Thinking";
+
+  const dots = document.createElement("span");
+  dots.className = "thinking-dots";
+  dots.setAttribute("aria-hidden", "true");
+  dots.innerHTML = "<span></span><span></span><span></span>";
+
+  row.append(orbit, text, dots);
+  card.append(roleLabel, row);
+
+  messagesElement.append(card);
+  messagesElement.scrollTop = messagesElement.scrollHeight;
+  thinkingMessageCard = card;
+}
+
+function hideThinkingIndicator() {
+  if (!thinkingMessageCard) return;
+  thinkingMessageCard.remove();
+  thinkingMessageCard = null;
 }
 
 function getAccelerators() {
@@ -490,6 +539,7 @@ if (form) {
 
     input.value = "";
     sendButton.disabled = true;
+    showThinkingIndicator();
 
     try {
       const requestMessages = getMessagesForRequest(messages);
@@ -517,13 +567,16 @@ if (form) {
         throw new Error(payload.error || payload.detail || "Chat request failed.");
       }
 
+      hideThinkingIndicator();
       messages.push({ role: payload.role, content: payload.content });
       appendMessage(payload.role, payload.content);
       await refreshHealth();
     } catch (error) {
+      hideThinkingIndicator();
       appendMessage("assistant", formatChatError(error));
       await loadModels();
     } finally {
+      hideThinkingIndicator();
       sendButton.disabled = false;
       input.focus();
     }
