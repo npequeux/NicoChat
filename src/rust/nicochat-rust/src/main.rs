@@ -143,6 +143,28 @@ struct OllamaMessage {
     content: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct IpApiResponse {
+    city: Option<String>,
+    region: Option<String>,
+    country_name: Option<String>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
+    timezone: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenMeteoResponse {
+    current_weather: Option<OpenMeteoCurrent>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenMeteoCurrent {
+    temperature: f64,
+    weathercode: i32,
+    windspeed: f64,
+}
+
 async fn index() -> Html<&'static str> {
     Html(INDEX_HTML)
 }
@@ -245,6 +267,40 @@ async fn chat(
     }
 
     let internet_access = request.internet_access.unwrap_or(true);
+    let mut internet_context_injected = false;
+
+    // Enrich all questions with internet context when enabled.
+    if internet_access {
+        if let Some(user_message) = request
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role.eq_ignore_ascii_case("user"))
+        {
+            if let Some(internet_context) =
+                try_fetch_relevant_context(&state.client, &user_message.content).await
+            {
+                let insert_index = request
+                    .messages
+                    .iter()
+                    .rposition(|message| message.role.eq_ignore_ascii_case("user"))
+                    .unwrap_or(0);
+
+                request.messages.insert(
+                    insert_index,
+                    ChatMessage {
+                        role: "system".to_string(),
+                        content: format!(
+                            "[Internet context for model]\n{}",
+                            internet_context
+                        ),
+                    },
+                );
+                internet_context_injected = true;
+            }
+        }
+    }
+
     let mut content = if state.use_mock {
         build_mock_reply(&request.messages)
     } else {
@@ -252,7 +308,7 @@ async fn chat(
     };
 
     // Fallback: if the first answer is unhelpful, enrich context from internet and retry once.
-    if internet_access && is_unhelpful_reply(&content) {
+    if internet_access && !internet_context_injected && is_unhelpful_reply(&content) {
         if let Some(user_message) = request
             .messages
             .iter()
@@ -317,15 +373,130 @@ fn is_unhelpful_reply(reply: &str) -> bool {
 }
 
 async fn try_fetch_relevant_context(client: &Client, user_content: &str) -> Option<String> {
+    if needs_location_context(user_content) {
+        if let Some(local_context) = fetch_location_weather_context(client).await {
+            return Some(local_context);
+        }
+    }
+
     if let Some(url) = extract_first_url(user_content) {
         return fetch_url_snippet(client, url).await;
     }
+
     fetch_search_snippet(client, user_content).await
 }
 
+fn needs_location_context(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("meteo")
+        || lower.contains("météo")
+        || lower.contains("weather")
+        || lower.contains("temperat")
+        || lower.contains("today")
+        || lower.contains("aujourd")
+        || lower.contains("que faire")
+        || lower.contains("quoi faire")
+        || lower.contains("what to do")
+        || lower.contains("activities")
+}
+
 fn extract_first_url(text: &str) -> Option<&str> {
-    let regex = Regex::new(r"https?://\\S+").ok()?;
+    let regex = Regex::new(r"https?://\S+").ok()?;
     regex.find(text).map(|m| m.as_str())
+}
+
+async fn fetch_location_weather_context(client: &Client) -> Option<String> {
+    let location = fetch_auto_location(client).await?;
+    let weather = fetch_weather_for_location(
+        client,
+        location.latitude,
+        location.longitude,
+    )
+    .await;
+
+    let location_label = format!(
+        "{}, {}, {}",
+        location.city,
+        location.region,
+        location.country
+    );
+
+    if let Some(weather_data) = weather {
+        let activity_hint = build_activity_hint(weather_data.temperature, weather_data.weathercode);
+        Some(format!(
+            "Localisation automatique: {location_label} (timezone: {}).\nMeteo actuelle: {:.1} C, vent {:.1} km/h, code meteo {}.\nSuggestion locale du jour: {activity_hint}",
+            location.timezone,
+            weather_data.temperature,
+            weather_data.windspeed,
+            weather_data.weathercode,
+        ))
+    } else {
+        Some(format!(
+            "Localisation automatique: {location_label} (timezone: {}).",
+            location.timezone,
+        ))
+    }
+}
+
+struct GeoLocation {
+    city: String,
+    region: String,
+    country: String,
+    latitude: f64,
+    longitude: f64,
+    timezone: String,
+}
+
+async fn fetch_auto_location(client: &Client) -> Option<GeoLocation> {
+    let response = client
+        .get("https://ipapi.co/json/")
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let payload: IpApiResponse = response.json().await.ok()?;
+    Some(GeoLocation {
+        city: payload.city.unwrap_or_else(|| "Unknown city".to_string()),
+        region: payload.region.unwrap_or_else(|| "Unknown region".to_string()),
+        country: payload
+            .country_name
+            .unwrap_or_else(|| "Unknown country".to_string()),
+        latitude: payload.latitude?,
+        longitude: payload.longitude?,
+        timezone: payload.timezone.unwrap_or_else(|| "Unknown timezone".to_string()),
+    })
+}
+
+async fn fetch_weather_for_location(
+    client: &Client,
+    latitude: f64,
+    longitude: f64,
+) -> Option<OpenMeteoCurrent> {
+    let url = format!(
+        "https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current_weather=true"
+    );
+    let response = client.get(url).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let payload: OpenMeteoResponse = response.json().await.ok()?;
+    payload.current_weather
+}
+
+fn build_activity_hint(temperature: f64, weather_code: i32) -> &'static str {
+    if weather_code >= 60 {
+        "Pluie probable: privilegie une activite en interieur (musee, cafe, cinema)."
+    } else if temperature >= 24.0 {
+        "Temps chaud: bonne option pour balade, parc ou terrasse avec hydratation."
+    } else if temperature <= 8.0 {
+        "Temps froid: prefere une activite en interieur ou une sortie courte bien couverte."
+    } else {
+        "Temps plutot agreable: balade en ville, marche local ou activite exterieure legere."
+    }
 }
 
 async fn fetch_url_snippet(client: &Client, url: &str) -> Option<String> {
@@ -386,12 +557,54 @@ async fn fetch_search_snippet(client: &Client, query: &str) -> Option<String> {
         .unwrap_or("")
         .trim();
 
-    if abstract_text.is_empty() {
-        None
-    } else if heading.is_empty() {
-        Some(format!("Search context: {}", abstract_text))
+    if !abstract_text.is_empty() {
+        if heading.is_empty() {
+            return Some(format!("Search context: {}", abstract_text));
+        }
+        return Some(format!("Search context ({}): {}", heading, abstract_text));
+    }
+
+    if let Some(related) = extract_related_topics(&payload) {
+        if heading.is_empty() {
+            Some(format!("Search related context: {}", related))
+        } else {
+            Some(format!("Search related context ({}): {}", heading, related))
+        }
     } else {
-        Some(format!("Search context ({}): {}", heading, abstract_text))
+        None
+    }
+}
+
+fn extract_related_topics(payload: &serde_json::Value) -> Option<String> {
+    let topics = payload.get("RelatedTopics")?.as_array()?;
+    let mut collected = Vec::new();
+
+    for item in topics {
+        if let Some(text) = item.get("Text").and_then(|v| v.as_str()) {
+            if !text.trim().is_empty() {
+                collected.push(text.trim().to_string());
+            }
+        }
+
+        if let Some(nested) = item.get("Topics").and_then(|v| v.as_array()) {
+            for nested_item in nested {
+                if let Some(text) = nested_item.get("Text").and_then(|v| v.as_str()) {
+                    if !text.trim().is_empty() {
+                        collected.push(text.trim().to_string());
+                    }
+                }
+            }
+        }
+
+        if collected.len() >= 3 {
+            break;
+        }
+    }
+
+    if collected.is_empty() {
+        None
+    } else {
+        Some(collected.join(" | "))
     }
 }
 
@@ -493,10 +706,14 @@ fn build_mock_reply(messages: &[ChatMessage]) -> String {
 
 fn static_text(contents: &'static str, content_type: &'static str) -> Response {
     let mut response = contents.into_response();
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static(content_type),
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store, no-cache, must-revalidate, max-age=0"),
     );
+    headers.insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
+    headers.insert(header::EXPIRES, HeaderValue::from_static("0"));
     response
 }
 
