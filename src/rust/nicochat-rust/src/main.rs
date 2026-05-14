@@ -225,16 +225,6 @@ struct OllamaMessage {
 }
 
 #[derive(Debug, Deserialize)]
-struct IpApiResponse {
-    city: Option<String>,
-    region: Option<String>,
-    country_name: Option<String>,
-    latitude: Option<f64>,
-    longitude: Option<f64>,
-    timezone: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 struct OpenMeteoResponse {
     current_weather: Option<OpenMeteoCurrent>,
 }
@@ -845,26 +835,15 @@ struct GeoLocation {
     timezone: String,
 }
 
-async fn fetch_auto_location(client: &Client) -> Option<GeoLocation> {
-    let response = client
-        .get("https://ipapi.co/json/")
-        .send()
-        .await
-        .ok()?;
-    if !response.status().is_success() {
-        return None;
-    }
-
-    let payload: IpApiResponse = response.json().await.ok()?;
+async fn fetch_auto_location(_client: &Client) -> Option<GeoLocation> {
+    // Product rule: when location is not explicitly specified, default to Brussels.
     Some(GeoLocation {
-        city: payload.city.unwrap_or_else(|| "Unknown city".to_string()),
-        region: payload.region.unwrap_or_else(|| "Unknown region".to_string()),
-        country: payload
-            .country_name
-            .unwrap_or_else(|| "Unknown country".to_string()),
-        latitude: payload.latitude?,
-        longitude: payload.longitude?,
-        timezone: payload.timezone.unwrap_or_else(|| "Unknown timezone".to_string()),
+        city: "Bruxelles".to_string(),
+        region: "Bruxelles-Capitale".to_string(),
+        country: "Belgique".to_string(),
+        latitude: 50.8503,
+        longitude: 4.3517,
+        timezone: "Europe/Brussels".to_string(),
     })
 }
 
