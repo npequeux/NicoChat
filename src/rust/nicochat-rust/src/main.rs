@@ -9,6 +9,7 @@ use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::fs;
 use std::{env, sync::Arc};
 use std::process::Command;
 
@@ -17,6 +18,33 @@ const APP_JS: &str = include_str!("../../../../web/app.js");
 const STYLES_CSS: &str = include_str!("../../../../web/styles.css");
 const MANIFEST: &str = include_str!("../../../../web/manifest.webmanifest");
 const SW_JS: &str = include_str!("../../../../web/sw.js");
+
+fn ollama_supports_npu_backend() -> bool {
+    const CANDIDATE_DIRS: [&str; 3] = ["/usr/local/lib/ollama", "/usr/lib/ollama", "/opt/ollama/lib"];
+
+    CANDIDATE_DIRS
+        .iter()
+        .any(|path| directory_contains_openvino_backend(path))
+}
+
+fn directory_contains_openvino_backend(path: &str) -> bool {
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(_) => return false,
+    };
+
+    entries.flatten().any(|entry| {
+        entry
+            .file_name()
+            .to_string_lossy()
+            .to_lowercase()
+            .contains("openvino")
+    })
+}
+
+fn npu_backend_unavailable_message() -> String {
+    "NPU requested, but this Ollama installation does not include an OpenVINO/NPU backend. Install an OpenVINO-enabled Ollama build, then restart Ollama.".to_string()
+}
 
 #[tokio::main]
 async fn main() {
@@ -70,6 +98,13 @@ async fn restart_ollama_with_accel(payload: Option<RestartOllamaRequest>) -> imp
     let selected = payload
         .as_ref()
         .and_then(|p| select_effective_accelerator(p.accelerators.as_deref(), p.accelerator.as_deref()));
+
+    if matches!(selected.as_deref(), Some("npu")) && !ollama_supports_npu_backend() {
+        return (
+            StatusCode::BAD_REQUEST,
+            npu_backend_unavailable_message(),
+        );
+    }
 
     if let Some(accel) = selected.as_ref() {
         unsafe {
@@ -192,6 +227,7 @@ struct HealthResponse {
     model: String,
     mode: &'static str,
     accelerator: String,
+    npu_supported: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -272,13 +308,21 @@ async fn sw_js() -> Response {
 }
 
 async fn health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let accelerator = env::var("OLLAMA_ACCELERATOR").unwrap_or_else(|_| "default".to_string());
+    let npu_supported = ollama_supports_npu_backend();
+    let configured_accelerator = env::var("OLLAMA_ACCELERATOR").unwrap_or_else(|_| "default".to_string());
+    let accelerator = if configured_accelerator.eq_ignore_ascii_case("npu") && !npu_supported {
+        "npu (unsupported: openvino backend missing)".to_string()
+    } else {
+        configured_accelerator
+    };
+
     Json(HealthResponse {
         status: "ok",
         backend: "Rust",
         model: state.model.clone(),
         mode: state.mode(),
         accelerator,
+        npu_supported,
     })
 }
 
@@ -371,6 +415,11 @@ async fn chat(
         request.accelerators.as_deref(),
         request.accelerator.as_deref(),
     );
+
+    if matches!(chosen_accel.as_deref(), Some("npu")) && !ollama_supports_npu_backend() {
+        return Err(service_unavailable(npu_backend_unavailable_message()));
+    }
+
     if let Some(ref accel) = chosen_accel {
         unsafe {
             std::env::set_var("OLLAMA_ACCELERATOR", accel);
