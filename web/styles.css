@@ -1,3 +1,25 @@
+/* Toggle button style for internet access and others */
+.toggle-btn {
+  margin-left: 0.5rem;
+  padding: 0.3em 1em;
+  border: 1px solid #888;
+  border-radius: 4px;
+  background: #e0e0e0;
+  color: #222;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.2s, color 0.2s;
+}
+.toggle-btn.active {
+  background: #4caf50;
+  color: #fff;
+  border-color: #388e3c;
+}
+.toggle-btn:not(.active) {
+  background: #e0e0e0;
+  color: #888;
+  border-color: #bbb;
+}
 
 :root {
   color-scheme: light;
@@ -145,6 +167,7 @@ textarea {
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 1rem;
+  flex-wrap: wrap;
 }
 
 .model-selector label {
@@ -167,6 +190,63 @@ textarea {
 }
 
 .model-selector select:focus {
+  outline: none;
+  border-color: var(--accent-yellow);
+  box-shadow: 0 0 0 2px var(--accent-yellow-dark);
+}
+
+.history-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.speed-control, .accelerator-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: 1.2rem;
+}
+
+.speed-control label, .accelerator-control label {
+  font-size: 0.85rem;
+  color: #4b5563;
+  white-space: nowrap;
+}
+
+.speed-control select, .accelerator-control select {
+  background: var(--background-white);
+  border: 1.5px solid var(--primary-blue);
+  border-radius: 10px;
+  color: #102040;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.speed-control select:focus, .accelerator-control select:focus {
+  outline: none;
+  border-color: var(--accent-yellow);
+  box-shadow: 0 0 0 2px var(--accent-yellow-dark);
+}
+
+.history-control label {
+  font-size: 0.85rem;
+  color: #4b5563;
+  white-space: nowrap;
+}
+
+.history-control input {
+  width: 84px;
+  background: var(--background-white);
+  border: 1.5px solid var(--primary-blue);
+  border-radius: 10px;
+  color: #102040;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.9rem;
+}
+
+.history-control input:focus {
   outline: none;
   border-color: var(--accent-yellow);
   box-shadow: 0 0 0 2px var(--accent-yellow-dark);

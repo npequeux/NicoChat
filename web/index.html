@@ -15,7 +15,7 @@
           <p class="eyebrow">Local AI chat</p>
           <h1>NicoChat</h1>
           <p class="subtitle">
-            A local-network chat UI backed by either a .NET or Rust server.
+            A local-network chat UI backed by the Rust server.
           </p>
         </div>
         <div class="status-card">
@@ -31,8 +31,51 @@
           <select id="modelSelect" title="Select model">
             <option value="" disabled selected>Loading models…</option>
           </select>
-          <p class="hint">Choose a model from the list loaded from Ollama before sending a message.</p>
+          <div class="history-control">
+            <label for="historyLengthInput">History:</label>
+            <input
+              id="historyLengthInput"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value="12"
+              title="Number of recent messages sent to the model"
+            />
+          </div>
+          <div class="speed-control">
+            <label for="speedModeSelect">Speed mode:</label>
+            <select id="speedModeSelect" title="Speed mode">
+              <option value="fast">Fast</option>
+              <option value="balanced" selected>Balanced</option>
+              <option value="quality">Quality</option>
+            </select>
+          </div>
+          <div class="accelerator-control">
+            <label for="acceleratorSelect">Accelerator:</label>
+            <select id="acceleratorSelect" title="Accelerator">
+              <option value="cpu" selected>CPU</option>
+              <option value="gpu">GPU</option>
+              <option value="npu">NPU</option>
+              <option value="remote">Remote (Internet)</option>
+            </select>
+            <input
+              id="remoteEndpointInput"
+              type="text"
+              placeholder="https://cloud.ollama.ai"
+              style="display:none; margin-left:0.5rem; width:220px;"
+              title="Remote Ollama endpoint (used if Remote is selected)"
+            />
+            </div>
+            <div class="internet-access-control" style="margin-top:0.7rem;">
+              <label for="internetAccessToggle">Allow Internet Access:</label>
+              <button id="internetAccessToggle" class="toggle-btn active" type="button">Enabled</button>
+            </div>
+          </div>
         </div>
+        <p class="hint">
+          Choose a model from Ollama and set how many recent messages are included per request. 0 means only your latest message.
+        </p>
 
         <div id="messages" class="messages" aria-live="polite">
         </div>

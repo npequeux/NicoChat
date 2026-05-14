@@ -1,3 +1,7 @@
+const internetAccessToggle = document.getElementById("internetAccessToggle");
+function getInternetAccess() {
+  return internetAccessToggle?.classList.contains("active");
+}
 const messages = [];
 const messagesElement = document.getElementById("messages");
 
@@ -5,6 +9,10 @@ const form = document.getElementById("chatForm");
 const input = document.getElementById("messageInput");
 const sendButton = document.getElementById("sendButton");
 const modelSelect = document.getElementById("modelSelect");
+const historyLengthInput = document.getElementById("historyLengthInput");
+const speedModeSelect = document.getElementById("speedModeSelect");
+const acceleratorSelect = document.getElementById("acceleratorSelect");
+const remoteEndpointInput = document.getElementById("remoteEndpointInput");
 
 // Enable Enter to send, Shift+Enter for newline
 if (input) {
@@ -32,6 +40,36 @@ function appendMessage(role, content) {
   card.append(roleLabel, body);
   messagesElement.append(card);
   messagesElement.scrollTop = messagesElement.scrollHeight;
+}
+
+function getHistoryLength() {
+  const parsed = Number.parseInt(historyLengthInput?.value ?? "12", 10);
+  if (Number.isNaN(parsed)) {
+    return 12;
+  }
+  return Math.min(100, Math.max(0, parsed));
+}
+
+function getMessagesForRequest(allMessages) {
+  const historyLength = getHistoryLength();
+
+  if (historyLength === 0) {
+    return allMessages.length > 0 ? [allMessages[allMessages.length - 1]] : [];
+  }
+
+  return allMessages.slice(-historyLength);
+}
+
+function getSpeedMode() {
+  return speedModeSelect?.value || "balanced";
+}
+
+function getAccelerator() {
+  return acceleratorSelect?.value || "cpu";
+}
+
+function getRemoteEndpoint() {
+  return remoteEndpointInput?.value?.trim() || "";
 }
 
 function formatChatError(error) {
@@ -102,11 +140,40 @@ form.addEventListener("submit", async (event) => {
   sendButton.disabled = true;
 
   try {
+    const requestMessages = getMessagesForRequest(messages);
+
+    const speedMode = getSpeedMode();
+    const accelerator = getAccelerator();
+
+    const remoteEndpoint = getRemoteEndpoint();
+    const internetAccess = getInternetAccess();
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, messages }),
+      body: JSON.stringify({ model, messages: requestMessages, speed_mode: speedMode, accelerator, remote_endpoint: remoteEndpoint, internet_access: internetAccess }),
     });
+// Internet access toggle logic
+if (internetAccessToggle) {
+  const saved = window.localStorage.getItem("nicochat-internet-access");
+  if (saved === "false") {
+    internetAccessToggle.classList.remove("active");
+    internetAccessToggle.textContent = "Disabled";
+  } else {
+    internetAccessToggle.classList.add("active");
+    internetAccessToggle.textContent = "Enabled";
+  }
+  internetAccessToggle.addEventListener("click", () => {
+    const enabled = !internetAccessToggle.classList.contains("active");
+    if (enabled) {
+      internetAccessToggle.classList.add("active");
+      internetAccessToggle.textContent = "Enabled";
+    } else {
+      internetAccessToggle.classList.remove("active");
+      internetAccessToggle.textContent = "Disabled";
+    }
+    window.localStorage.setItem("nicochat-internet-access", enabled ? "true" : "false");
+  });
+}
 
     const payload = await response.json();
     if (!response.ok) {
@@ -127,6 +194,53 @@ form.addEventListener("submit", async (event) => {
 
 if ("serviceWorker" in navigator && (window.isSecureContext || location.hostname === "localhost")) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
+
+if (historyLengthInput) {
+  const savedValue = window.localStorage.getItem("nicochat-history-length");
+  if (savedValue !== null) {
+    historyLengthInput.value = savedValue;
+  }
+
+  historyLengthInput.addEventListener("change", () => {
+    historyLengthInput.value = String(getHistoryLength());
+    window.localStorage.setItem("nicochat-history-length", historyLengthInput.value);
+  });
+}
+
+if (speedModeSelect) {
+  const savedSpeed = window.localStorage.getItem("nicochat-speed-mode");
+  if (savedSpeed) speedModeSelect.value = savedSpeed;
+  speedModeSelect.addEventListener("change", () => {
+    window.localStorage.setItem("nicochat-speed-mode", speedModeSelect.value);
+  });
+}
+
+if (acceleratorSelect) {
+  const savedAccel = window.localStorage.getItem("nicochat-accelerator");
+  if (savedAccel) acceleratorSelect.value = savedAccel;
+  acceleratorSelect.addEventListener("change", () => {
+    window.localStorage.setItem("nicochat-accelerator", acceleratorSelect.value);
+    if (acceleratorSelect.value === "remote") {
+      remoteEndpointInput.style.display = "inline-block";
+    } else {
+      remoteEndpointInput.style.display = "none";
+    }
+  });
+  // Initial show/hide
+  if (acceleratorSelect.value === "remote") {
+    remoteEndpointInput.style.display = "inline-block";
+  } else {
+    remoteEndpointInput.style.display = "none";
+  }
+}
+
+if (remoteEndpointInput) {
+  const savedRemote = window.localStorage.getItem("nicochat-remote-endpoint");
+  if (savedRemote) remoteEndpointInput.value = savedRemote;
+  remoteEndpointInput.addEventListener("change", () => {
+    window.localStorage.setItem("nicochat-remote-endpoint", remoteEndpointInput.value);
+  });
 }
 
 refreshHealth().catch(() => {

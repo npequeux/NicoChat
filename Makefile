@@ -1,4 +1,3 @@
-BACKEND ?= dotnet
 PORT ?= 5000
 OLLAMA_URL ?= http://127.0.0.1:11434
 OLLAMA_LOG_PATH ?=
@@ -8,22 +7,10 @@ OLLAMA_READY_TIMEOUT ?= 10
 .PHONY: build run ensure-ollama
 
 build:
-ifeq ($(BACKEND),dotnet)
-	dotnet build src/dotnet/NicoChat.DotNet/NicoChat.DotNet.csproj
-else ifeq ($(BACKEND),rust)
 	cargo build --manifest-path src/rust/nicochat-rust/Cargo.toml
-else
-	$(error Unknown BACKEND "$(BACKEND)". Use dotnet or rust)
-endif
 
 run: ensure-ollama
-ifeq ($(BACKEND),dotnet)
-	ASPNETCORE_URLS=http://0.0.0.0:$(PORT) dotnet run --no-launch-profile --project src/dotnet/NicoChat.DotNet/NicoChat.DotNet.csproj
-else ifeq ($(BACKEND),rust)
 	PORT=$(PORT) cargo run --manifest-path src/rust/nicochat-rust/Cargo.toml
-else
-	$(error Unknown BACKEND "$(BACKEND)". Use dotnet or rust)
-endif
 
 ensure-ollama:
 	@mock_mode="$$(printf '%s' '$(NICOCHAT_USE_MOCK)' | tr '[:upper:]' '[:lower:]')"; \

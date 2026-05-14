@@ -76,6 +76,8 @@ struct ChatMessage {
 struct ChatRequest {
     messages: Vec<ChatMessage>,
     model: Option<String>,
+    speed_mode: Option<String>,
+    accelerator: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -204,10 +206,25 @@ async fn chat(
         .unwrap_or(&state.model)
         .to_string();
 
+
+    // Speed mode tuning
+    let (temperature, top_p, top_k, repeat_penalty, max_tokens) = match request.speed_mode.as_deref() {
+        Some("fast") => (0.2, 0.8, 10, 1.1, 256),
+        Some("quality") => (0.8, 1.0, 40, 1.0, 1024),
+        _ => (0.5, 0.95, 20, 1.0, 512), // balanced
+    };
+
+    // Accelerator: set env for new Ollama launches (not for running daemon)
+    if let Some(accel) = request.accelerator.as_deref() {
+        unsafe {
+            std::env::set_var("OLLAMA_ACCELERATOR", accel);
+        }
+    }
+
     let content = if state.use_mock {
         build_mock_reply(&request.messages)
     } else {
-        fetch_ollama_reply(&state, &request.messages, &model).await?
+        fetch_ollama_reply_tuned(&state, &request.messages, &model, temperature, top_p, top_k, repeat_penalty, max_tokens).await?
     };
 
     Ok(Json(ChatReply {
@@ -218,10 +235,15 @@ async fn chat(
     }))
 }
 
-async fn fetch_ollama_reply(
+async fn fetch_ollama_reply_tuned(
     state: &AppState,
     messages: &[ChatMessage],
     model: &str,
+    temperature: f32,
+    top_p: f32,
+    top_k: u32,
+    repeat_penalty: f32,
+    max_tokens: u32,
 ) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
     let normalized_messages = messages
         .iter()
@@ -235,6 +257,13 @@ async fn fetch_ollama_reply(
             "model": model,
             "stream": false,
             "messages": normalized_messages,
+            "options": {
+                "temperature": temperature,
+                "top_p": top_p,
+                "top_k": top_k,
+                "repeat_penalty": repeat_penalty,
+                "num_predict": max_tokens
+            }
         }))
         .send()
         .await
