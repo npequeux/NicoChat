@@ -4,7 +4,7 @@ OLLAMA_LOG_PATH ?=
 OLLAMA_PID_PATH ?=
 OLLAMA_READY_TIMEOUT ?= 10
 
-.PHONY: build run ensure-ollama stop-app
+.PHONY: build run ensure-ollama stop-app android-apk
 
 build:
 	cargo build --manifest-path src/rust/nicochat-rust/Cargo.toml
@@ -18,6 +18,10 @@ run: ensure-ollama stop-app
 		exit 0; \
 	fi; \
 	exit $$exit_code
+
+android-apk:
+	cd android && gradle --no-daemon :app:assembleDebug
+	@echo "APK generated at android/app/build/outputs/apk/debug/app-debug.apk"
 
 stop-app:
 	@existing_pids="$$(pgrep -x 'nicochat-rust' || true)"; \

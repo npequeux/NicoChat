@@ -37,6 +37,20 @@ http://127.0.0.1:5000
 - `NICOCHAT_USE_MOCK=true` to bypass Ollama with deterministic mock replies
 - `PORT` (default: `5000`)
 
+## Android app
+
+The `android/` folder contains a minimal Android client that opens the locally hosted NicoChat UI inside a WebView. On startup it probes your local subnet for a reachable NicoChat instance (`/api/models` on port `5000`, with `/models` fallback) and auto-loads the first match. You can still enter a LAN URL manually, for example:
+
+```text
+http://192.168.1.20:5000
+```
+
+Generate a debug APK from the repository root:
+
+```bash
+make android-apk
+```
+
 ## Project structure
 
 ```text
