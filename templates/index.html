@@ -274,7 +274,6 @@
       const models = Array.isArray(payload.models) ? payload.models : [];
       const previousModel = modelSelect.value;
 
-      modelSelect.innerHTML = '';
       if (models.length === 0) {
         modelSelect.innerHTML = '<option value="" disabled selected>No models found</option>';
         noModelsWarning.style.display = 'block';
@@ -282,6 +281,7 @@
         return;
       }
 
+      modelSelect.innerHTML = '';
       for (const modelName of models) {
         const option = document.createElement('option');
         option.value = modelName;

@@ -23,10 +23,17 @@ def _ollama_host():
     return "127.0.0.1:11434"
 
 
-def _ollama_available(host):
+def _ollama_env(host):
+    allowed = ["PATH", "HOME", "USER", "TMPDIR", "XDG_DATA_HOME", "XDG_CONFIG_HOME"]
+    env = {k: os.environ[k] for k in allowed if k in os.environ}
+    env["OLLAMA_HOST"] = host
+    return env
+
+
+def _ollama_available(host, ollama_bin):
     result = subprocess.run(
-        ["ollama", "list"],
-        env={**os.environ, "OLLAMA_HOST": host},
+        [ollama_bin, "list"],
+        env=_ollama_env(host),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -38,20 +45,24 @@ def ensure_ollama_running():
     """Start Ollama automatically when not already available."""
     if os.environ.get("NICOCHAT_USE_MOCK", "").lower() == "true":
         return
-    if shutil.which("ollama") is None:
+    ollama_bin = shutil.which("ollama")
+    if ollama_bin is None:
         return
 
     host = _ollama_host()
-    if _ollama_available(host):
+    if _ollama_available(host, ollama_bin):
         return
 
-    subprocess.Popen(
-        ["ollama", "serve"],
-        env={**os.environ, "OLLAMA_HOST": host},
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    try:
+        subprocess.Popen(
+            [ollama_bin, "serve"],
+            env=_ollama_env(host),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        return
 
     try:
         ready_timeout_seconds = int(os.environ.get("OLLAMA_READY_TIMEOUT", "10"))
@@ -60,7 +71,7 @@ def ensure_ollama_running():
     ready_timeout_seconds = max(ready_timeout_seconds, 1)
 
     for _ in range(ready_timeout_seconds):
-        if _ollama_available(host):
+        if _ollama_available(host, ollama_bin):
             return
         time.sleep(1)
 
