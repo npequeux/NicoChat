@@ -125,7 +125,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             var found: String? = null
-            for (_ in 0 until candidates.size) {
+            for (attemptIndex in 0 until candidates.size) {
                 val result = completion.take().get()
                 if (result != null) {
                     found = result

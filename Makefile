@@ -20,7 +20,24 @@ run: ensure-ollama stop-app
 	exit $$exit_code
 
 android-apk:
-	cd android && gradle --no-daemon :app:assembleDebug
+	@if ! command -v javac >/dev/null 2>&1; then \
+		echo "Error: javac not found. Install a JDK (17+), e.g. sudo apt install openjdk-21-jdk"; \
+		exit 1; \
+	fi
+	@sdk_dir=""; \
+	if [ -n "$$ANDROID_HOME" ] && [ -d "$$ANDROID_HOME" ]; then \
+		sdk_dir="$$ANDROID_HOME"; \
+	elif [ -n "$$ANDROID_SDK_ROOT" ] && [ -d "$$ANDROID_SDK_ROOT" ]; then \
+		sdk_dir="$$ANDROID_SDK_ROOT"; \
+	elif [ -d "$$HOME/Android/Sdk" ]; then \
+		sdk_dir="$$HOME/Android/Sdk"; \
+	fi; \
+	if [ -z "$$sdk_dir" ]; then \
+		echo "Error: Android SDK not found. Set ANDROID_HOME or ANDROID_SDK_ROOT, or install SDK to $$HOME/Android/Sdk"; \
+		exit 1; \
+	fi; \
+	printf 'sdk.dir=%s\n' "$$sdk_dir" > android/local.properties
+	cd android && ./gradlew --no-daemon :app:assembleDebug
 	@echo "APK generated at android/app/build/outputs/apk/debug/app-debug.apk"
 
 stop-app:
