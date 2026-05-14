@@ -69,7 +69,7 @@ function appendMessage(role, content) {
 }
 
 function makeDownloadFileName(prefix, extension) {
-  const timestamp = new Date().toISOString().replace(/[T:.Z]/g, "-");
+  const timestamp = new Date().toISOString().slice(0, -1).replace(/[T:.]/g, "-");
   return `nicochat-${prefix}-${timestamp}.${extension}`;
 }
 
@@ -177,7 +177,8 @@ function importDocumentToComposer(file) {
   const reader = new FileReader();
   reader.onload = () => {
     const text = typeof reader.result === "string" ? reader.result : "";
-    const importBlock = `[Imported document: ${file.name}]\n${text.trim()}`;
+    const safeFileName = file.name.replace(/[\r\n<>]/g, "_");
+    const importBlock = `[Imported document: ${safeFileName}]\n${text.trim()}`;
     messageInput.value = messageInput.value.trim()
       ? `${messageInput.value.trim()}\n\n${importBlock}`
       : importBlock;
