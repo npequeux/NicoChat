@@ -4,13 +4,28 @@ OLLAMA_LOG_PATH ?=
 OLLAMA_PID_PATH ?=
 OLLAMA_READY_TIMEOUT ?= 10
 
-.PHONY: build run ensure-ollama
+.PHONY: build run ensure-ollama stop-app
 
 build:
 	cargo build --manifest-path src/rust/nicochat-rust/Cargo.toml
 
-run: ensure-ollama
-	PORT=$(PORT) cargo run --manifest-path src/rust/nicochat-rust/Cargo.toml
+run: ensure-ollama stop-app
+	@set +e; \
+	PORT=$(PORT) cargo run --manifest-path src/rust/nicochat-rust/Cargo.toml; \
+	exit_code=$$?; \
+	if [ $$exit_code -eq 130 ] || [ $$exit_code -eq 143 ]; then \
+		echo "NicoChat stopped."; \
+		exit 0; \
+	fi; \
+	exit $$exit_code
+
+stop-app:
+	@existing_pids="$$(pgrep -x 'nicochat-rust' || true)"; \
+	if [ -n "$$existing_pids" ]; then \
+		echo "Stopping existing NicoChat process(es): $$existing_pids"; \
+		kill $$existing_pids >/dev/null 2>&1 || true; \
+		sleep 1; \
+	fi
 
 ensure-ollama:
 	@mock_mode="$$(printf '%s' '$(NICOCHAT_USE_MOCK)' | tr '[:upper:]' '[:lower:]')"; \
