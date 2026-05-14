@@ -373,17 +373,38 @@ fn is_unhelpful_reply(reply: &str) -> bool {
 }
 
 async fn try_fetch_relevant_context(client: &Client, user_content: &str) -> Option<String> {
+    let default_location_context = fetch_default_location_context(client).await;
+
     if needs_location_context(user_content) {
         if let Some(local_context) = fetch_location_weather_context(client).await {
-            return Some(local_context);
+            return Some(merge_contexts(default_location_context, Some(local_context)));
         }
     }
 
     if let Some(url) = extract_first_url(user_content) {
-        return fetch_url_snippet(client, url).await;
+        let url_context = fetch_url_snippet(client, url).await;
+        return Some(merge_contexts(default_location_context, url_context));
     }
 
-    fetch_search_snippet(client, user_content).await
+    let search_context = fetch_search_snippet(client, user_content).await;
+    Some(merge_contexts(default_location_context, search_context))
+}
+
+fn merge_contexts(primary: Option<String>, secondary: Option<String>) -> String {
+    match (primary, secondary) {
+        (Some(a), Some(b)) => format!("{a}\n\n{b}"),
+        (Some(a), None) => a,
+        (None, Some(b)) => b,
+        (None, None) => "Localisation non disponible.".to_string(),
+    }
+}
+
+async fn fetch_default_location_context(client: &Client) -> Option<String> {
+    let location = fetch_auto_location(client).await?;
+    Some(format!(
+        "Localisation automatique par defaut: {}, {}, {} (timezone: {}).",
+        location.city, location.region, location.country, location.timezone
+    ))
 }
 
 fn needs_location_context(text: &str) -> bool {
