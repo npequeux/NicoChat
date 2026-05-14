@@ -27,7 +27,24 @@ fn ollama_supports_npu_backend() -> bool {
         .any(|path| directory_contains_openvino_backend(path))
 }
 
+fn ollama_supports_gpu_backend() -> bool {
+    const CANDIDATE_DIRS: [&str; 3] = ["/usr/local/lib/ollama", "/usr/lib/ollama", "/opt/ollama/lib"];
+
+    let has_vulkan_backend = CANDIDATE_DIRS
+        .iter()
+        .any(|path| directory_contains_backend_keyword(path, "vulkan"));
+
+    // OpenVINO builds can drive Intel GPU through /dev/dri when runtime is present.
+    let has_openvino_gpu_path = ollama_supports_npu_backend() && fs::metadata("/dev/dri/renderD128").is_ok();
+
+    has_vulkan_backend || has_openvino_gpu_path
+}
+
 fn directory_contains_openvino_backend(path: &str) -> bool {
+    directory_contains_backend_keyword(path, "openvino")
+}
+
+fn directory_contains_backend_keyword(path: &str, keyword: &str) -> bool {
     let entries = match fs::read_dir(path) {
         Ok(entries) => entries,
         Err(_) => return false,
@@ -38,12 +55,16 @@ fn directory_contains_openvino_backend(path: &str) -> bool {
             .file_name()
             .to_string_lossy()
             .to_lowercase()
-            .contains("openvino")
+            .contains(keyword)
     })
 }
 
 fn npu_backend_unavailable_message() -> String {
     "NPU requested, but this Ollama installation does not include an OpenVINO/NPU backend. Install an OpenVINO-enabled Ollama build, then restart Ollama.".to_string()
+}
+
+fn gpu_backend_unavailable_message() -> String {
+    "GPU requested, but this Ollama installation does not expose a usable GPU backend. Install a GPU-capable Ollama build (Vulkan or OpenVINO GPU) and verify /dev/dri access, then restart Ollama.".to_string()
 }
 
 #[tokio::main]
@@ -103,6 +124,13 @@ async fn restart_ollama_with_accel(payload: Option<RestartOllamaRequest>) -> imp
         return (
             StatusCode::BAD_REQUEST,
             npu_backend_unavailable_message(),
+        );
+    }
+
+    if matches!(selected.as_deref(), Some("gpu")) && !ollama_supports_gpu_backend() {
+        return (
+            StatusCode::BAD_REQUEST,
+            gpu_backend_unavailable_message(),
         );
     }
 
@@ -228,6 +256,7 @@ struct HealthResponse {
     mode: &'static str,
     accelerator: String,
     npu_supported: bool,
+    gpu_supported: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -309,9 +338,12 @@ async fn sw_js() -> Response {
 
 async fn health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let npu_supported = ollama_supports_npu_backend();
+    let gpu_supported = ollama_supports_gpu_backend();
     let configured_accelerator = env::var("OLLAMA_ACCELERATOR").unwrap_or_else(|_| "default".to_string());
     let accelerator = if configured_accelerator.eq_ignore_ascii_case("npu") && !npu_supported {
         "npu (unsupported: openvino backend missing)".to_string()
+    } else if configured_accelerator.eq_ignore_ascii_case("gpu") && !gpu_supported {
+        "gpu (unsupported: no gpu backend available)".to_string()
     } else {
         configured_accelerator
     };
@@ -323,6 +355,7 @@ async fn health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         mode: state.mode(),
         accelerator,
         npu_supported,
+        gpu_supported,
     })
 }
 
@@ -418,6 +451,10 @@ async fn chat(
 
     if matches!(chosen_accel.as_deref(), Some("npu")) && !ollama_supports_npu_backend() {
         return Err(service_unavailable(npu_backend_unavailable_message()));
+    }
+
+    if matches!(chosen_accel.as_deref(), Some("gpu")) && !ollama_supports_gpu_backend() {
+        return Err(service_unavailable(gpu_backend_unavailable_message()));
     }
 
     if let Some(ref accel) = chosen_accel {
