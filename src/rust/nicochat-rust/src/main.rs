@@ -679,11 +679,29 @@ fn extract_first_url(text: &str) -> Option<&str> {
 }
 
 fn extract_weather_city(text: &str) -> Option<String> {
+    let normalized = text.trim();
+
+    // French/English direct forms: "meteo a Bruxelles", "weather in Brussels", etc.
+    let direct_pattern = Regex::new(
+        r"(?i)(?:^|\b)(?:weather|meteo|météo)\s*(?:de|du|des|pour|in|for|at|a|à)\s+([A-Za-zÀ-ÿ\-\s']{2,})",
+    )
+    .ok()?;
+    if let Some(caps) = direct_pattern.captures(normalized) {
+        let value = caps
+            .get(1)?
+            .as_str()
+            .trim()
+            .trim_matches(|c: char| c == '.' || c == ',' || c == '?' || c == '!');
+        if let Some(clean) = sanitize_city_candidate(value) {
+            return Some(clean);
+        }
+    }
+
     let pattern1 = Regex::new(
         r"(?i)(?:weather|meteo|météo)[^\n]*?(?:in|for|at|a|à)\s+([A-Za-zÀ-ÿ\-\s']{2,})",
     )
     .ok()?;
-    if let Some(caps) = pattern1.captures(text) {
+    if let Some(caps) = pattern1.captures(normalized) {
         let value = caps
             .get(1)?
             .as_str()
@@ -695,7 +713,7 @@ fn extract_weather_city(text: &str) -> Option<String> {
     }
 
     let pattern2 = Regex::new(r"(?i)([A-Za-zÀ-ÿ\-\s']{2,})\s+(?:weather|meteo|météo)").ok()?;
-    if let Some(caps) = pattern2.captures(text) {
+    if let Some(caps) = pattern2.captures(normalized) {
         let value = caps
             .get(1)?
             .as_str()
@@ -716,6 +734,19 @@ fn sanitize_city_candidate(raw: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>();
 
+    while let Some(first) = parts.first() {
+        let lower = first.to_lowercase();
+        let is_leading_noise = matches!(
+            lower.as_str(),
+            "la" | "le" | "les" | "de" | "du" | "des" | "d" | "dans" | "en"
+        );
+        if is_leading_noise {
+            parts.remove(0);
+        } else {
+            break;
+        }
+    }
+
     while let Some(last) = parts.last() {
         let lower = last.to_lowercase();
         let is_trailer = matches!(
@@ -734,9 +765,16 @@ fn sanitize_city_candidate(raw: &str) -> Option<String> {
                 | "weather"
                 | "meteo"
                 | "météo"
+                | "meteo?"
+                | "météo?"
                 | "is"
                 | "the"
                 | "right"
+                | "aujourd"
+                | "maintenant"
+                | "stp"
+                | "svp"
+                | "merci"
         );
         if is_trailer {
             parts.pop();
@@ -790,11 +828,27 @@ async fn geocode_city(client: &Client, city: &str) -> Option<OpenMeteoGeocodeIte
 async fn fetch_weather_for_requested_city(client: &Client, user_content: &str) -> Option<String> {
     let city = extract_weather_city(user_content)?;
     let mut candidates = vec![city.clone()];
+
+    // Common cross-language aliases improve geocoding success for French user input.
+    let city_lower = city.to_lowercase();
+    if city_lower == "bruxelles" {
+        candidates.push("Brussels".to_string());
+    } else if city_lower == "anvers" {
+        candidates.push("Antwerp".to_string());
+    } else if city_lower == "londres" {
+        candidates.push("London".to_string());
+    } else if city_lower == "munich" || city_lower == "münchen" {
+        candidates.push("Munich".to_string());
+    }
+
     if let Some(first_word) = city.split_whitespace().next() {
         if first_word != city {
             candidates.push(first_word.to_string());
         }
     }
+
+    candidates.sort();
+    candidates.dedup();
 
     let mut first = None;
     for candidate in candidates {
