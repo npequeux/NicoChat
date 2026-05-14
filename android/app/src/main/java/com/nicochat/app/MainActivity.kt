@@ -1,6 +1,7 @@
 package com.nicochat.app
 
 import android.os.Bundle
+import android.util.Log
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -17,6 +18,13 @@ import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
+    companion object {
+        private const val TAG = "NicoChatMainActivity"
+        private const val SERVER_PORT = 5000
+        private const val SCAN_THREAD_POOL_SIZE = 24
+        private const val DETECTION_TIMEOUT_MS = 250
+    }
+
     private lateinit var webView: WebView
     private val detectionExecutor = Executors.newSingleThreadExecutor()
 
@@ -94,18 +102,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun detectServerOnLocalNetwork(): String? {
-        val candidates = linkedSetOf("http://10.0.2.2:5000")
+        val candidates = linkedSetOf("http://10.0.2.2:$SERVER_PORT")
         for (prefix in localSubnetPrefixes()) {
             for (host in 1..254) {
-                candidates.add("http://$prefix.$host:5000")
+                candidates.add("http://$prefix.$host:$SERVER_PORT")
             }
         }
 
-        if (candidates.isEmpty()) {
-            return null
-        }
-
-        val scanner = Executors.newFixedThreadPool(24)
+        val scanner = Executors.newFixedThreadPool(SCAN_THREAD_POOL_SIZE)
         val completion = ExecutorCompletionService<String?>(scanner)
         return try {
             candidates.forEach { baseUrl ->
@@ -114,14 +118,17 @@ class MainActivity : AppCompatActivity() {
                 })
             }
 
-            repeat(candidates.size) {
+            var found: String? = null
+            for (_ in 0 until candidates.size) {
                 val result = completion.take().get()
                 if (result != null) {
-                    return result
+                    found = result
+                    break
                 }
             }
-            null
-        } catch (_: Exception) {
+            found
+        } catch (exc: Exception) {
+            Log.w(TAG, "Server detection failed", exc)
             null
         } finally {
             scanner.shutdownNow()
@@ -146,7 +153,8 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (exc: Exception) {
+            Log.w(TAG, "Failed to enumerate local subnets", exc)
             return prefixes
         }
         return prefixes
@@ -156,8 +164,8 @@ class MainActivity : AppCompatActivity() {
         val normalizedBase = normalizeUrl(baseUrl).removeSuffix("/")
         val connection = (URL("$normalizedBase/models").openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 250
-            readTimeout = 250
+            connectTimeout = DETECTION_TIMEOUT_MS
+            readTimeout = DETECTION_TIMEOUT_MS
             instanceFollowRedirects = true
         }
 
