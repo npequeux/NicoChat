@@ -277,20 +277,20 @@ textarea {
   gap: 0.4rem;
 }
 
-.speed-control, .accelerator-control {
+.speed-control, .accelerator-control, .role-control {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
   margin-left: 1.2rem;
 }
 
-.speed-control label, .accelerator-control label {
+.speed-control label, .accelerator-control label, .role-control label {
   font-size: 0.85rem;
   color: #4b5563;
   white-space: nowrap;
 }
 
-.speed-control select, .accelerator-control select {
+.speed-control select, .accelerator-control select, .role-control select {
   background: var(--background-white);
   border: 1.5px solid var(--primary-blue);
   border-radius: 10px;
@@ -300,7 +300,7 @@ textarea {
   cursor: pointer;
 }
 
-.speed-control select:focus, .accelerator-control select:focus {
+.speed-control select:focus, .accelerator-control select:focus, .role-control select:focus {
   outline: none;
   border-color: var(--accent-yellow);
   box-shadow: 0 0 0 2px var(--accent-yellow-dark);
