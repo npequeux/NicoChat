@@ -379,39 +379,6 @@ async fn chat(
 
     let internet_access = request.internet_access.unwrap_or(true);
 
-    // Deterministic weather fast-path: answer from live weather APIs when possible.
-    let latest_user_message = request
-        .messages
-        .iter()
-        .rev()
-        .find(|message| message.role.eq_ignore_ascii_case("user"))
-        .map(|m| m.content.clone())
-        .unwrap_or_default();
-
-    if internet_access && is_weather_query(&latest_user_message) {
-        if let Some(city_weather) = fetch_weather_for_requested_city(&state.client, &latest_user_message).await {
-            return Ok(Json(ChatReply {
-                role: "assistant",
-                content: format!(
-                    "{city_weather}\nSource: Open-Meteo (meteo en temps reel)."
-                ),
-                mode: state.mode(),
-                model,
-            }));
-        }
-
-        if let Some(local_weather) = fetch_location_weather_context(&state.client).await {
-            return Ok(Json(ChatReply {
-                role: "assistant",
-                content: format!(
-                    "Je n'ai pas pu identifier la ville demandee avec certitude, voici la meteo locale detectee:\n{local_weather}\nSource: Open-Meteo (meteo en temps reel)."
-                ),
-                mode: state.mode(),
-                model,
-            }));
-        }
-    }
-
     // Enrich all questions with internet context when enabled.
     if internet_access {
         if let Some(user_message) = request
@@ -613,10 +580,6 @@ async fn try_fetch_retry_context(client: &Client, user_content: &str) -> Option<
 async fn try_fetch_relevant_context(client: &Client, user_content: &str) -> Option<String> {
     let mut parts = Vec::new();
 
-    if let Some(default_location_context) = fetch_default_location_context(client).await {
-        parts.push(default_location_context);
-    }
-
     if is_weather_query(user_content) {
         if let Some(city_weather) = fetch_weather_for_requested_city(client, user_content).await {
             parts.push(city_weather);
@@ -651,14 +614,6 @@ async fn try_fetch_relevant_context(client: &Client, user_content: &str) -> Opti
     }
 }
 
-async fn fetch_default_location_context(client: &Client) -> Option<String> {
-    let location = fetch_auto_location(client).await?;
-    Some(format!(
-        "Localisation automatique par defaut: {}, {}, {} (timezone: {}).",
-        location.city, location.region, location.country, location.timezone
-    ))
-}
-
 fn needs_location_context(text: &str) -> bool {
     let lower = text.to_lowercase();
     lower.contains("meteo")
@@ -683,7 +638,7 @@ fn extract_weather_city(text: &str) -> Option<String> {
 
     // French/English direct forms: "meteo a Bruxelles", "weather in Brussels", etc.
     let direct_pattern = Regex::new(
-        r"(?i)(?:^|\b)(?:weather|meteo|météo)\s*(?:de|du|des|pour|in|for|at|a|à)\s+([A-Za-zÀ-ÿ\-\s']{2,})",
+        r"(?i)(?:^|\b)(?:weather|meteo|météo)\s*(?:de|du|des|pour|in|for|at|a|à|au|aux)\s+([A-Za-zÀ-ÿ\-\s']{2,})",
     )
     .ok()?;
     if let Some(caps) = direct_pattern.captures(normalized) {
@@ -698,7 +653,7 @@ fn extract_weather_city(text: &str) -> Option<String> {
     }
 
     let pattern1 = Regex::new(
-        r"(?i)(?:weather|meteo|météo)[^\n]*?(?:in|for|at|a|à)\s+([A-Za-zÀ-ÿ\-\s']{2,})",
+        r"(?i)(?:weather|meteo|météo)[^\n]*?(?:in|for|at|a|à|au|aux)\s+([A-Za-zÀ-ÿ\-\s']{2,})",
     )
     .ok()?;
     if let Some(caps) = pattern1.captures(normalized) {
@@ -738,7 +693,7 @@ fn sanitize_city_candidate(raw: &str) -> Option<String> {
         let lower = first.to_lowercase();
         let is_leading_noise = matches!(
             lower.as_str(),
-            "la" | "le" | "les" | "de" | "du" | "des" | "d" | "dans" | "en"
+            "la" | "le" | "les" | "de" | "du" | "des" | "d" | "dans" | "en" | "au" | "aux"
         );
         if is_leading_noise {
             parts.remove(0);
@@ -839,6 +794,32 @@ async fn fetch_weather_for_requested_city(client: &Client, user_content: &str) -
         candidates.push("London".to_string());
     } else if city_lower == "munich" || city_lower == "münchen" {
         candidates.push("Munich".to_string());
+    } else if city_lower == "japon" {
+        candidates.push("Japan".to_string());
+        candidates.push("Tokyo".to_string());
+    } else if city_lower == "france" {
+        candidates.push("France".to_string());
+        candidates.push("Paris".to_string());
+    } else if city_lower == "belgique" {
+        candidates.push("Belgium".to_string());
+    } else if city_lower == "allemagne" {
+        candidates.push("Germany".to_string());
+        candidates.push("Berlin".to_string());
+    } else if city_lower == "espagne" {
+        candidates.push("Spain".to_string());
+        candidates.push("Madrid".to_string());
+    } else if city_lower == "italie" {
+        candidates.push("Italy".to_string());
+        candidates.push("Rome".to_string());
+    } else if city_lower == "portugal" {
+        candidates.push("Portugal".to_string());
+        candidates.push("Lisbon".to_string());
+    } else if city_lower == "royaume-uni" || city_lower == "royaume uni" {
+        candidates.push("United Kingdom".to_string());
+        candidates.push("London".to_string());
+    } else if city_lower == "etats-unis" || city_lower == "etats unis" || city_lower == "usa" {
+        candidates.push("United States".to_string());
+        candidates.push("Washington".to_string());
     }
 
     if let Some(first_word) = city.split_whitespace().next() {
@@ -1283,6 +1264,14 @@ mod tests {
         assert_eq!(
             extract_weather_city("meteo a Bruxelles aujourd'hui"),
             Some("Bruxelles".to_string())
+        );
+        assert_eq!(
+            extract_weather_city("météo au japon"),
+            Some("japon".to_string())
+        );
+        assert_eq!(
+            extract_weather_city("meteo aux etats unis"),
+            Some("etats unis".to_string())
         );
         assert_eq!(
             extract_weather_city("weather in New York"),
