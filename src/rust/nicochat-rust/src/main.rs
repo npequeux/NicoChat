@@ -543,7 +543,7 @@ async fn chat(
 
     if internet_access && is_image_request(&latest_user_content) {
         let image_query = build_image_search_query(&request.messages, &latest_user_content);
-        let has_media_in_model_reply = response_contains_media_url(&content);
+        // let has_media_in_model_reply = response_contains_media_url(&content);
         let fetched_urls = if let Some(urls) = fetch_wikimedia_image_urls(&state.client, &image_query, 3).await {
             Some(urls)
         } else {
@@ -558,19 +558,12 @@ async fn chat(
                     .collect::<Vec<_>>()
                     .join("\n");
 
-                if is_unhelpful_reply(&content) || !has_media_in_model_reply {
-                    content = format!(
-                        "Voici des images pour \"{}\":\n{}",
-                        image_query,
-                        media_block
-                    );
-                } else {
-                    content = format!(
-                        "{}\n\nSources image verifiees:\n{}",
-                        content,
-                        media_block
-                    );
-                }
+                // Always show the image block if images are found, regardless of model reply
+                content = format!(
+                    "Voici des images pour \"{}\":\n{}",
+                    image_query,
+                    media_block
+                );
             }
         }
     }
@@ -600,26 +593,6 @@ fn is_image_request(text: &str) -> bool {
         || lower.contains("pic")
         || lower.contains("montre moi")
         || lower.contains("show me")
-}
-
-fn response_contains_media_url(text: &str) -> bool {
-    let Ok(url_regex) = Regex::new(r"https?://\S+") else {
-        return false;
-    };
-
-    url_regex.find_iter(text).any(|m| {
-        let url = m.as_str().to_lowercase();
-        url.ends_with(".png")
-            || url.ends_with(".jpg")
-            || url.ends_with(".jpeg")
-            || url.ends_with(".webp")
-            || url.ends_with(".gif")
-            || url.contains("youtube.com/watch")
-            || url.contains("youtu.be/")
-            || url.ends_with(".mp4")
-            || url.ends_with(".webm")
-            || url.ends_with(".mp3")
-    })
 }
 
 fn sanitize_image_query(raw: &str) -> String {
