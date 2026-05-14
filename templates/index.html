@@ -336,6 +336,17 @@
     statusBar.textContent = msg;
   }
 
+  function friendlyChatError(message) {
+    const raw = message || 'Unknown error';
+    const normalized = raw.toLowerCase();
+
+    if (normalized.includes('not installed in ollama') || (normalized.includes('model') && normalized.includes('not found'))) {
+      return "Selected model is not installed in Ollama. Run 'ollama list', choose an available model from the dropdown, and retry.";
+    }
+
+    return raw;
+  }
+
   async function sendMessage() {
     const text = userInput.value.trim();
     if (!text || isStreaming) return;
@@ -393,8 +404,9 @@
           try {
             const parsed = JSON.parse(payload);
             if (parsed.error) {
-              bubble.textContent = '\u26A0 ' + parsed.error;
+              bubble.textContent = '\u26A0 ' + friendlyChatError(parsed.error);
               bubble.classList.remove('typing');
+              await refreshModels();
             } else if (parsed.content) {
               fullContent += parsed.content;
               bubble.textContent = fullContent;
@@ -406,7 +418,8 @@
         }
       }
     } catch (err) {
-      bubble.textContent = '\u26A0 Network error: ' + err.message;
+      bubble.textContent = '\u26A0 ' + friendlyChatError(err.message);
+      await refreshModels();
     } finally {
       bubble.classList.remove('typing');
       if (fullContent) {

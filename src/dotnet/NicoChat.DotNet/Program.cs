@@ -54,7 +54,7 @@ app.MapPost("/api/chat", async Task<IResult> (ChatRequest request, ChatGateway g
     {
         return Results.Problem(
             title: "Local AI backend unavailable",
-            detail: exception.Message,
+            detail: gateway.ToClientErrorMessage(exception),
             statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 });
@@ -71,6 +71,22 @@ sealed class ChatGateway(HttpClient httpClient)
     public string Model { get; } = Environment.GetEnvironmentVariable("OLLAMA_MODEL") ?? "qwen3";
     public string Mode => _useMock ? "mock" : "ollama";
 
+    public string ToClientErrorMessage(HttpRequestException? exception = null)
+    {
+        if (_useMock)
+        {
+            return "Mock mode is enabled.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(exception?.Message))
+        {
+            return exception!.Message;
+        }
+
+        return $"Unable to reach local Ollama instance at {_ollamaUrl}. " +
+               "Start it with 'ollama serve', verify connectivity with 'ollama list', or set NICOCHAT_USE_MOCK=true.";
+    }
+
     public async Task<IReadOnlyList<string>> GetModelsAsync(CancellationToken cancellationToken)
     {
         if (_useMock)
@@ -83,11 +99,11 @@ sealed class ChatGateway(HttpClient httpClient)
             var tags = await _httpClient.GetFromJsonAsync<OllamaTagsResponse>(
                 $"{_ollamaUrl}/api/tags", cancellationToken);
             var names = tags?.Models?.Select(m => m.Name).Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
-            return names is { Count: > 0 } ? names! : [Model];
+            return names is { Count: > 0 } ? names! : [];
         }
         catch
         {
-            return [Model];
+            return [];
         }
     }
 
@@ -109,6 +125,16 @@ sealed class ChatGateway(HttpClient httpClient)
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            if (response.StatusCode == HttpStatusCode.NotFound &&
+                body.Contains("not found", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new HttpRequestException(
+                    $"Selected model '{model}' is not installed in Ollama. Run 'ollama list' and choose an available model from the GUI.",
+                    null,
+                    response.StatusCode);
+            }
+
             throw new HttpRequestException(
                 $"Ollama responded with {(int)response.StatusCode} {response.StatusCode}: {body}",
                 null,

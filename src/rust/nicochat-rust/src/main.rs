@@ -173,9 +173,9 @@ async fn models(State(state): State<Arc<AppState>>) -> impl IntoResponse {
                 .and_then(|tags| tags.models)
                 .map(|list| list.into_iter().map(|m| m.name).filter(|n| !n.is_empty()).collect::<Vec<_>>())
                 .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| vec![state.model.clone()])
+                .unwrap_or_default()
         }
-        _ => vec![state.model.clone()],
+        _ => Vec::new(),
     };
 
     Json(ModelsResponse { models: model_names })
@@ -243,6 +243,14 @@ async fn fetch_ollama_reply(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
+
+        if status == StatusCode::NOT_FOUND && body.to_lowercase().contains("not found") {
+            return Err(service_unavailable(format!(
+                "Selected model '{}' is not installed in Ollama. Run 'ollama list' and choose an available model from the GUI.",
+                model
+            )));
+        }
+
         return Err(service_unavailable(format!(
             "Ollama responded with {}: {}",
             status, body

@@ -21,6 +21,17 @@ function appendMessage(role, content) {
   messagesElement.scrollTop = messagesElement.scrollHeight;
 }
 
+function formatChatError(error) {
+  const raw = error instanceof Error ? error.message : "Unknown error";
+  const normalized = raw.toLowerCase();
+
+  if (normalized.includes("not installed in ollama") || normalized.includes("model") && normalized.includes("not found")) {
+    return "Selected model is not installed in Ollama. Run 'ollama list', pick an available model in the dropdown, and retry.";
+  }
+
+  return `Unable to respond: ${raw}`;
+}
+
 async function refreshHealth() {
   const response = await fetch("/api/health");
   const payload = await response.json();
@@ -93,10 +104,8 @@ form.addEventListener("submit", async (event) => {
     appendMessage(payload.role, payload.content);
     await refreshHealth();
   } catch (error) {
-    appendMessage(
-      "assistant",
-      `Unable to respond: ${error instanceof Error ? error.message : "Unknown error"}`
-    );
+    appendMessage("assistant", formatChatError(error));
+    await loadModels();
   } finally {
     sendButton.disabled = false;
     input.focus();
