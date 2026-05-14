@@ -80,6 +80,7 @@ class TestIndexRoute(unittest.TestCase):
         with patch.object(self.app_module, "get_ollama_models", return_value=["llama3:latest"]):
             resp = self.client.get("/")
             self.assertEqual(resp.status_code, 200)
+            self.assertIn(b"Select a model and send a message to begin.", resp.data)
 
     def test_index_contains_model_in_html(self):
         with patch.object(self.app_module, "get_ollama_models", return_value=["llama3:latest"]):
