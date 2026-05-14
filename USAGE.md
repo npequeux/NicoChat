@@ -80,7 +80,7 @@ NICOCHAT_USE_MOCK=true make run BACKEND=rust
 
 ## Android client
 
-The `android/` folder contains a small WebView client. Point it to the NicoChat URL running on your machine, for example:
+The `android/` folder contains a small WebView client. On launch it probes your local subnet for a reachable NicoChat server at `/models` on port `5000` and auto-loads the first match. You can also point it manually to the NicoChat URL running on your machine, for example:
 
 ```text
 http://192.168.1.20:5000

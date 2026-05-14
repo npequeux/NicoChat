@@ -84,7 +84,7 @@ Environment variables shared by all backends:
 
 ## Android app
 
-The `android/` folder contains a minimal Android client that opens the locally hosted NicoChat UI inside a WebView. Enter the LAN URL of your server, for example:
+The `android/` folder contains a minimal Android client that opens the locally hosted NicoChat UI inside a WebView. On startup it now probes your local subnet for a reachable NicoChat instance (`/models` on port `5000`) and auto-loads the first match. You can still enter a LAN URL manually, for example:
 
 ```text
 http://192.168.1.20:5000
