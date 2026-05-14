@@ -1052,13 +1052,13 @@ mod tests {
     use super::extract_weather_city;
 
     #[test]
-    fn extract_weather_city_returns_none_when_no_city_is_provided() {
+    fn test_extract_weather_city_no_city_provided() {
         assert_eq!(extract_weather_city("Quelle meteo aujourd'hui ?"), None);
         assert_eq!(extract_weather_city("weather today"), None);
     }
 
     #[test]
-    fn extract_weather_city_returns_city_when_provided() {
+    fn test_extract_weather_city_with_city_provided() {
         assert_eq!(
             extract_weather_city("meteo a Bruxelles aujourd'hui"),
             Some("Bruxelles".to_string())
