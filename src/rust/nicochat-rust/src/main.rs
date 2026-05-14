@@ -639,6 +639,11 @@ async fn try_fetch_relevant_context(client: &Client, user_content: &str) -> Opti
         parts.push(search_context);
     }
 
+    // Always try to add a live web-search snapshot so each request has internet signals.
+    if let Some(live_search_context) = fetch_jina_search_snippet(client, user_content).await {
+        parts.push(format!("Live web context: {}", live_search_context));
+    }
+
     if parts.is_empty() {
         None
     } else {
