@@ -64,8 +64,8 @@ struct RestartOllamaRequest {
 }
 
 async fn restart_ollama_with_accel(payload: Option<RestartOllamaRequest>) -> impl IntoResponse {
-    // Try to stop Ollama (ignore errors if not running)
-    let _ = Command::new("ollama").arg("stop").output();
+    // Stop existing Ollama server process if running.
+    let _ = Command::new("pkill").args(["-f", "ollama serve"]).output();
 
     let selected = payload
         .as_ref()
@@ -75,13 +75,46 @@ async fn restart_ollama_with_accel(payload: Option<RestartOllamaRequest>) -> imp
         unsafe {
             std::env::set_var("OLLAMA_ACCELERATOR", accel);
         }
+        match accel.as_str() {
+            "gpu" => {
+                unsafe {
+                    std::env::remove_var("OLLAMA_LLM_LIBRARY");
+                    std::env::set_var("OLLAMA_VULKAN", "1");
+                }
+            }
+            "npu" => {
+                // Best-effort: request oneAPI/OpenVINO backend if available.
+                unsafe {
+                    std::env::set_var("OLLAMA_LLM_LIBRARY", "openvino");
+                    std::env::remove_var("OLLAMA_VULKAN");
+                }
+            }
+            _ => {
+                unsafe {
+                    std::env::remove_var("OLLAMA_VULKAN");
+                }
+            }
+        }
     }
 
     // Start Ollama with selected accelerator env.
     let mut cmd = Command::new("ollama");
     cmd.arg("serve");
     if let Some(accel) = selected {
-        cmd.env("OLLAMA_ACCELERATOR", accel);
+        cmd.env("OLLAMA_ACCELERATOR", &accel);
+        match accel.as_str() {
+            "gpu" => {
+                cmd.env_remove("OLLAMA_LLM_LIBRARY");
+                cmd.env("OLLAMA_VULKAN", "1");
+            }
+            "npu" => {
+                cmd.env("OLLAMA_LLM_LIBRARY", "openvino");
+                cmd.env_remove("OLLAMA_VULKAN");
+            }
+            _ => {
+                cmd.env_remove("OLLAMA_VULKAN");
+            }
+        }
     }
     let result = cmd.spawn();
     match result {
@@ -189,16 +222,6 @@ struct OllamaResponse {
 #[derive(Debug, Deserialize)]
 struct OllamaMessage {
     content: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct IpApiResponse {
-    city: Option<String>,
-    region: Option<String>,
-    country_name: Option<String>,
-    latitude: Option<f64>,
-    longitude: Option<f64>,
-    timezone: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -348,13 +371,46 @@ async fn chat(
         request.accelerators.as_deref(),
         request.accelerator.as_deref(),
     );
-    if let Some(accel) = chosen_accel {
+    if let Some(ref accel) = chosen_accel {
         unsafe {
-            std::env::set_var("OLLAMA_ACCELERATOR", &accel);
+            std::env::set_var("OLLAMA_ACCELERATOR", accel);
         }
     }
 
     let internet_access = request.internet_access.unwrap_or(true);
+
+    // Deterministic weather fast-path: answer from live weather APIs when possible.
+    let latest_user_message = request
+        .messages
+        .iter()
+        .rev()
+        .find(|message| message.role.eq_ignore_ascii_case("user"))
+        .map(|m| m.content.clone())
+        .unwrap_or_default();
+
+    if internet_access && is_weather_query(&latest_user_message) {
+        if let Some(city_weather) = fetch_weather_for_requested_city(&state.client, &latest_user_message).await {
+            return Ok(Json(ChatReply {
+                role: "assistant",
+                content: format!(
+                    "{city_weather}\nSource: Open-Meteo (meteo en temps reel)."
+                ),
+                mode: state.mode(),
+                model,
+            }));
+        }
+
+        if let Some(local_weather) = fetch_location_weather_context(&state.client).await {
+            return Ok(Json(ChatReply {
+                role: "assistant",
+                content: format!(
+                    "Je n'ai pas pu identifier la ville demandee avec certitude, voici la meteo locale detectee:\n{local_weather}\nSource: Open-Meteo (meteo en temps reel)."
+                ),
+                mode: state.mode(),
+                model,
+            }));
+        }
+    }
 
     // Enrich all questions with internet context when enabled.
     if internet_access {
@@ -390,7 +446,19 @@ async fn chat(
     let mut content = if state.use_mock {
         build_mock_reply(&request.messages)
     } else {
-        fetch_ollama_reply_tuned(&state, &request.messages, &model, temperature, top_p, top_k, repeat_penalty, max_tokens, internet_access).await?
+        fetch_ollama_reply_tuned(
+            &state,
+            &request.messages,
+            &model,
+            temperature,
+            top_p,
+            top_k,
+            repeat_penalty,
+            max_tokens,
+            internet_access,
+            chosen_accel.as_deref(),
+        )
+        .await?
     };
 
     // Fallback: if the first answer is unhelpful, enrich context from internet and retry once.
@@ -432,6 +500,7 @@ async fn chat(
                         repeat_penalty,
                         max_tokens,
                         internet_access,
+                        chosen_accel.as_deref(),
                     )
                     .await?
                 };
@@ -470,7 +539,30 @@ fn is_unhelpful_reply(reply: &str) -> bool {
         || lower.contains("recommend checking")
         || lower.contains("check a reliable weather")
     || lower.contains("weather website or app")
+        || lower.contains("je n'ai pas d'informations actualisees")
+        || lower.contains("je n'ai pas d'informations actualisées")
+        || lower.contains("je n'ai pas d'information actualisee")
+        || lower.contains("je n'ai pas d'information actualisée")
+        || lower.contains("je n'ai pas acces aux informations meteorologiques en temps reel")
+        || lower.contains("je n'ai pas accès aux informations météorologiques en temps réel")
+        || lower.contains("je ne peux pas fournir des informations meteorologiques en temps reel")
+        || lower.contains("je ne peux pas fournir des informations météorologiques en temps réel")
+        || lower.contains("en tant qu'assistant base sur le texte")
+        || lower.contains("en tant qu'assistant basé sur le texte")
+        || lower.contains("je vous recommande de consulter")
+        || lower.contains("consulter directement les sites officiels")
+        || lower.contains("rechercher les evenements locaux")
+        || lower.contains("rechercher les événements locaux")
 }
+
+    fn is_weather_query(text: &str) -> bool {
+        let lower = text.to_lowercase();
+        lower.contains("meteo")
+        || lower.contains("météo")
+        || lower.contains("weather")
+        || lower.contains("temperature")
+        || lower.contains("température")
+    }
 
 fn build_grounded_answer_from_context(context: &str) -> String {
     let mut out = String::new();
@@ -500,40 +592,57 @@ fn build_grounded_answer_from_context(context: &str) -> String {
 }
 
 async fn try_fetch_retry_context(client: &Client, user_content: &str) -> Option<String> {
-    if let Some(city_weather) = fetch_weather_for_requested_city(client, user_content).await {
-        return Some(city_weather);
+    let mut parts = Vec::new();
+
+    if let Some(base) = try_fetch_relevant_context(client, user_content).await {
+        parts.push(base);
     }
-    try_fetch_relevant_context(client, user_content).await
+
+    let forced_query = format!("latest {}", user_content.trim());
+    if let Some(extra) = fetch_jina_search_snippet(client, &forced_query).await {
+        parts.push(format!("Retry web context: {}", extra));
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n"))
+    }
 }
 
 async fn try_fetch_relevant_context(client: &Client, user_content: &str) -> Option<String> {
-    let default_location_context = fetch_default_location_context(client).await;
+    let mut parts = Vec::new();
 
-    if needs_location_context(user_content) {
+    if let Some(default_location_context) = fetch_default_location_context(client).await {
+        parts.push(default_location_context);
+    }
+
+    if is_weather_query(user_content) {
         if let Some(city_weather) = fetch_weather_for_requested_city(client, user_content).await {
-            return Some(merge_contexts(default_location_context, Some(city_weather)));
+            parts.push(city_weather);
+        } else if let Some(local_context) = fetch_location_weather_context(client).await {
+            parts.push(local_context);
         }
-
+    } else if needs_location_context(user_content) {
         if let Some(local_context) = fetch_location_weather_context(client).await {
-            return Some(merge_contexts(default_location_context, Some(local_context)));
+            parts.push(local_context);
         }
     }
 
     if let Some(url) = extract_first_url(user_content) {
-        let url_context = fetch_url_snippet(client, url).await;
-        return Some(merge_contexts(default_location_context, url_context));
+        if let Some(url_context) = fetch_url_snippet(client, url).await {
+            parts.push(url_context);
+        }
     }
 
-    let search_context = fetch_search_snippet(client, user_content).await;
-    Some(merge_contexts(default_location_context, search_context))
-}
+    if let Some(search_context) = fetch_search_snippet(client, user_content).await {
+        parts.push(search_context);
+    }
 
-fn merge_contexts(primary: Option<String>, secondary: Option<String>) -> String {
-    match (primary, secondary) {
-        (Some(a), Some(b)) => format!("{a}\n\n{b}"),
-        (Some(a), None) => a,
-        (None, Some(b)) => b,
-        (None, None) => "Localisation non disponible.".to_string(),
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n"))
     }
 }
 
@@ -751,26 +860,15 @@ struct GeoLocation {
     timezone: String,
 }
 
-async fn fetch_auto_location(client: &Client) -> Option<GeoLocation> {
-    let response = client
-        .get("https://ipapi.co/json/")
-        .send()
-        .await
-        .ok()?;
-    if !response.status().is_success() {
-        return None;
-    }
-
-    let payload: IpApiResponse = response.json().await.ok()?;
+async fn fetch_auto_location(_client: &Client) -> Option<GeoLocation> {
+    // Product rule: when location is not explicitly specified, default to Brussels.
     Some(GeoLocation {
-        city: payload.city.unwrap_or_else(|| "Unknown city".to_string()),
-        region: payload.region.unwrap_or_else(|| "Unknown region".to_string()),
-        country: payload
-            .country_name
-            .unwrap_or_else(|| "Unknown country".to_string()),
-        latitude: payload.latitude?,
-        longitude: payload.longitude?,
-        timezone: payload.timezone.unwrap_or_else(|| "Unknown timezone".to_string()),
+        city: "Bruxelles".to_string(),
+        region: "Bruxelles-Capitale".to_string(),
+        country: "Belgique".to_string(),
+        latitude: 50.8503,
+        longitude: 4.3517,
+        timezone: "Europe/Brussels".to_string(),
     })
 }
 
@@ -875,7 +973,57 @@ async fn fetch_search_snippet(client: &Client, query: &str) -> Option<String> {
             Some(format!("Search related context ({}): {}", heading, related))
         }
     } else {
+        fetch_jina_search_snippet(client, trimmed).await
+    }
+}
+
+async fn fetch_jina_search_snippet(client: &Client, query: &str) -> Option<String> {
+    let encoded_query = query.split_whitespace().collect::<Vec<_>>().join("+");
+    let url = format!(
+        "https://r.jina.ai/http://duckduckgo.com/?q={encoded_query}"
+    );
+
+    let response = client.get(url).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let text = response.text().await.ok()?;
+    let mut collected = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Keep lines likely to contain useful factual signals (dates/events/results).
+        let lower = trimmed.to_lowercase();
+        let has_signal = lower.contains("http")
+            || lower.contains("result")
+            || lower.contains("date")
+            || lower.contains("event")
+            || lower.contains("pride")
+            || lower.contains("brussels")
+            || lower.contains("202")
+            || lower.contains("agenda")
+            || lower.contains("official");
+
+        if has_signal {
+            collected.push(trimmed.to_string());
+        }
+
+        if collected.len() >= 8 {
+            break;
+        }
+    }
+
+    if collected.is_empty() {
         None
+    } else {
+        Some(format!(
+            "Search web context: {}",
+            collected.join(" | ")
+        ))
     }
 }
 
@@ -922,6 +1070,7 @@ async fn fetch_ollama_reply_tuned(
     repeat_penalty: f32,
     max_tokens: u32,
     internet_access: bool,
+    accelerator: Option<&str>,
 ) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
 
     // If internet access is disabled, block any user/system message that looks like a web request
@@ -937,6 +1086,25 @@ async fn fetch_ollama_reply_tuned(
         .map(|message| json!({ "role": message.role.to_lowercase(), "content": message.content }))
         .collect::<Vec<_>>();
 
+    let mut options = serde_json::Map::new();
+    options.insert("temperature".to_string(), json!(temperature));
+    options.insert("top_p".to_string(), json!(top_p));
+    options.insert("top_k".to_string(), json!(top_k));
+    options.insert("repeat_penalty".to_string(), json!(repeat_penalty));
+    options.insert("num_predict".to_string(), json!(max_tokens));
+
+    // Make accelerator choice visible in inference behavior.
+    match accelerator {
+        Some("gpu") => {
+            options.insert("num_gpu".to_string(), json!(999));
+        }
+        Some("npu") => {
+            // Best effort fallback when true NPU backend is unavailable.
+            options.insert("num_gpu".to_string(), json!(0));
+        }
+        _ => {}
+    }
+
     let response = state
         .client
         .post(format!("{}/api/chat", state.ollama_url))
@@ -944,13 +1112,7 @@ async fn fetch_ollama_reply_tuned(
             "model": model,
             "stream": false,
             "messages": normalized_messages,
-            "options": {
-                "temperature": temperature,
-                "top_p": top_p,
-                "top_k": top_k,
-                "repeat_penalty": repeat_penalty,
-                "num_predict": max_tokens
-            }
+            "options": options
         }))
         .send()
         .await

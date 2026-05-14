@@ -78,6 +78,14 @@
 
         <form id="chatForm" class="composer">
           <label class="sr-only" for="messageInput">Message</label>
+          <div class="composer-tools">
+            <button id="importDocumentButton" type="button">Import document</button>
+            <input
+              id="importDocumentInput"
+              type="file"
+              accept=".txt,.md,.json,.csv,.log,text/plain,text/markdown,application/json,text/csv"
+            />
+          </div>
           <textarea
             id="messageInput"
             name="message"
