@@ -148,6 +148,46 @@ textarea {
   color: #102040;
 }
 
+.insight-grid {
+  margin-top: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.55rem;
+}
+
+.insight-card {
+  background: #f8fbff;
+  border: 1px solid var(--border-blue);
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem;
+}
+
+.insight-title {
+  margin: 0 0 0.25rem !important;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--primary-blue) !important;
+  font-weight: 700;
+}
+
+.insight-value {
+  margin: 0 !important;
+  font-size: 0.86rem;
+  line-height: 1.25;
+  color: #102040 !important;
+}
+
+.insight-link {
+  text-decoration: none;
+  color: inherit;
+}
+
+.insight-link:hover {
+  border-color: var(--primary-blue);
+  background: #eef5ff;
+}
+
 
 .role {
   font-size: 0.78rem;

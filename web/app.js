@@ -48,8 +48,125 @@ function appendMessage(role, content) {
   body.textContent = content;
 
   card.append(roleLabel, body);
+
+  if (role === "assistant") {
+    const insights = extractResponseInsights(content);
+    const rich = renderRichInsights(insights);
+    if (rich) {
+      card.append(rich);
+    }
+  }
+
   messagesElement.append(card);
   messagesElement.scrollTop = messagesElement.scrollHeight;
+}
+
+function extractResponseInsights(content) {
+  const text = content || "";
+  const insights = {
+    location: null,
+    weather: null,
+    sourceUrl: null,
+    searchContext: null,
+    snippets: [],
+  };
+
+  const locationMatch = text.match(/Localisation[^:\n]*:\s*([^\n]+)/i);
+  if (locationMatch) {
+    insights.location = locationMatch[1].trim();
+  }
+
+  const weatherMatch = text.match(/Meteo[^:\n]*:\s*([^\n]+)/i) || text.match(/Weather[^:\n]*:\s*([^\n]+)/i);
+  if (weatherMatch) {
+    insights.weather = weatherMatch[1].trim();
+  }
+
+  const sourceMatch = text.match(/Source:\s*(https?:\/\/\S+)/i);
+  if (sourceMatch) {
+    insights.sourceUrl = sourceMatch[1].trim();
+  }
+
+  const searchContextMatch = text.match(/Search\s+(?:related\s+)?context(?:\s*\([^\)]*\))?:\s*([^\n]+)/i);
+  if (searchContextMatch) {
+    insights.searchContext = searchContextMatch[1].trim();
+  }
+
+  const snippetRegex = /Snippet:\s*([^\n]+)/gi;
+  for (const match of text.matchAll(snippetRegex)) {
+    const snippet = (match[1] || "").trim();
+    if (snippet) {
+      insights.snippets.push(snippet);
+    }
+    if (insights.snippets.length >= 2) {
+      break;
+    }
+  }
+
+  return insights;
+}
+
+function createInsightCard(title, value) {
+  const card = document.createElement("div");
+  card.className = "insight-card";
+
+  const titleEl = document.createElement("p");
+  titleEl.className = "insight-title";
+  titleEl.textContent = title;
+
+  const valueEl = document.createElement("p");
+  valueEl.className = "insight-value";
+  valueEl.textContent = value;
+
+  card.append(titleEl, valueEl);
+  return card;
+}
+
+function renderRichInsights(insights) {
+  const container = document.createElement("div");
+  container.className = "insight-grid";
+  let hasContent = false;
+
+  if (insights.location) {
+    container.append(createInsightCard("Localisation", insights.location));
+    hasContent = true;
+  }
+
+  if (insights.weather) {
+    container.append(createInsightCard("Meteo", insights.weather));
+    hasContent = true;
+  }
+
+  if (insights.searchContext) {
+    container.append(createInsightCard("Contexte web", insights.searchContext));
+    hasContent = true;
+  }
+
+  if (insights.snippets.length > 0) {
+    container.append(createInsightCard("Extrait", insights.snippets[0]));
+    hasContent = true;
+  }
+
+  if (insights.sourceUrl) {
+    const linkCard = document.createElement("a");
+    linkCard.className = "insight-card insight-link";
+    linkCard.href = insights.sourceUrl;
+    linkCard.target = "_blank";
+    linkCard.rel = "noopener noreferrer";
+
+    const t = document.createElement("p");
+    t.className = "insight-title";
+    t.textContent = "Source";
+
+    const v = document.createElement("p");
+    v.className = "insight-value";
+    v.textContent = insights.sourceUrl;
+
+    linkCard.append(t, v);
+    container.append(linkCard);
+    hasContent = true;
+  }
+
+  return hasContent ? container : null;
 }
 
 function getHistoryLength() {

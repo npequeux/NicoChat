@@ -213,6 +213,21 @@ struct OpenMeteoCurrent {
     windspeed: f64,
 }
 
+#[derive(Debug, Deserialize)]
+struct OpenMeteoGeocodeResponse {
+    results: Option<Vec<OpenMeteoGeocodeItem>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenMeteoGeocodeItem {
+    name: String,
+    country: Option<String>,
+    admin1: Option<String>,
+    latitude: f64,
+    longitude: f64,
+    timezone: Option<String>,
+}
+
 async fn index() -> Html<&'static str> {
     Html(INDEX_HTML)
 }
@@ -340,7 +355,6 @@ async fn chat(
     }
 
     let internet_access = request.internet_access.unwrap_or(true);
-    let mut internet_context_injected = false;
 
     // Enrich all questions with internet context when enabled.
     if internet_access {
@@ -369,7 +383,6 @@ async fn chat(
                         ),
                     },
                 );
-                internet_context_injected = true;
             }
         }
     }
@@ -381,14 +394,14 @@ async fn chat(
     };
 
     // Fallback: if the first answer is unhelpful, enrich context from internet and retry once.
-    if internet_access && !internet_context_injected && is_unhelpful_reply(&content) {
+    if internet_access && is_unhelpful_reply(&content) {
         if let Some(user_message) = request
             .messages
             .iter()
             .rev()
             .find(|message| message.role.eq_ignore_ascii_case("user"))
         {
-            if let Some(internet_context) = try_fetch_relevant_context(&state.client, &user_message.content).await {
+            if let Some(internet_context) = try_fetch_retry_context(&state.client, &user_message.content).await {
                 let insert_index = request
                     .messages
                     .iter()
@@ -400,7 +413,7 @@ async fn chat(
                     ChatMessage {
                         role: "system".to_string(),
                         content: format!(
-                            "[Internet context for better answer]\n{}",
+                            "[Internet fallback context for accurate answer]\n{}",
                             internet_context
                         ),
                     },
@@ -422,6 +435,11 @@ async fn chat(
                     )
                     .await?
                 };
+
+                // Hard guarantee: if model still returns a generic refusal, answer directly from fetched data.
+                if is_unhelpful_reply(&content) {
+                    content = build_grounded_answer_from_context(&internet_context);
+                }
             }
         }
     }
@@ -443,6 +461,49 @@ fn is_unhelpful_reply(reply: &str) -> bool {
         || lower.contains("i cannot")
         || lower.contains("i can't")
         || lower.contains("not enough information")
+        || lower.contains("unable to provide real-time")
+        || lower.contains("cannot provide real-time")
+    || lower.contains("don't have real-time data")
+    || lower.contains("do not have real-time data")
+    || lower.contains("no real-time data")
+    || lower.contains("last time the data was updated")
+        || lower.contains("recommend checking")
+        || lower.contains("check a reliable weather")
+    || lower.contains("weather website or app")
+}
+
+fn build_grounded_answer_from_context(context: &str) -> String {
+    let mut out = String::new();
+    out.push_str("Voici les donnees recuperees en temps reel:\n");
+
+    let mut lines_added = 0usize;
+    for line in context.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        out.push_str("- ");
+        out.push_str(trimmed);
+        out.push('\n');
+        lines_added += 1;
+        if lines_added >= 6 {
+            break;
+        }
+    }
+
+    if lines_added == 0 {
+        "Je n'ai pas pu formater les donnees internet, mais la recuperation a ete tentee. Reessayez avec une question plus precise (ex: meteo a Bruxelles aujourd'hui).".to_string()
+    } else {
+        out.push_str("\nReponse basee sur les donnees ci-dessus.");
+        out
+    }
+}
+
+async fn try_fetch_retry_context(client: &Client, user_content: &str) -> Option<String> {
+    if let Some(city_weather) = fetch_weather_for_requested_city(client, user_content).await {
+        return Some(city_weather);
+    }
+    try_fetch_relevant_context(client, user_content).await
 }
 
 async fn try_fetch_relevant_context(client: &Client, user_content: &str) -> Option<String> {
@@ -497,6 +558,126 @@ fn needs_location_context(text: &str) -> bool {
 fn extract_first_url(text: &str) -> Option<&str> {
     let regex = Regex::new(r"https?://\S+").ok()?;
     regex.find(text).map(|m| m.as_str())
+}
+
+fn extract_weather_city(text: &str) -> Option<String> {
+    let pattern1 = Regex::new(
+        r"(?i)(?:weather|meteo|météo)[^\n]*?(?:in|for|at|a|à)\s+([A-Za-zÀ-ÿ\-\s']{2,})",
+    )
+    .ok()?;
+    if let Some(caps) = pattern1.captures(text) {
+        let value = caps
+            .get(1)?
+            .as_str()
+            .trim()
+            .trim_matches(|c: char| c == '.' || c == ',' || c == '?' || c == '!');
+        if let Some(clean) = sanitize_city_candidate(value) {
+            return Some(clean);
+        }
+    }
+
+    let pattern2 = Regex::new(r"(?i)([A-Za-zÀ-ÿ\-\s']{2,})\s+(?:weather|meteo|météo)").ok()?;
+    if let Some(caps) = pattern2.captures(text) {
+        let value = caps
+            .get(1)?
+            .as_str()
+            .trim()
+            .trim_matches(|c: char| c == '.' || c == ',' || c == '?' || c == '!');
+        if let Some(clean) = sanitize_city_candidate(value) {
+            return Some(clean);
+        }
+    }
+
+    None
+}
+
+fn sanitize_city_candidate(raw: &str) -> Option<String> {
+    let mut parts = raw
+        .split_whitespace()
+        .map(|s| s.trim_matches(|c: char| c == '.' || c == ',' || c == '?' || c == '!'))
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+
+    while let Some(last) = parts.last() {
+        let lower = last.to_lowercase();
+        let is_trailer = matches!(
+            lower.as_str(),
+            "like"
+                | "today"
+                | "now"
+                | "please"
+                | "currently"
+                | "current"
+                | "weather"
+                | "meteo"
+                | "météo"
+                | "is"
+                | "the"
+                | "right"
+        );
+        if is_trailer {
+            parts.pop();
+        } else {
+            break;
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" "))
+    }
+}
+
+async fn geocode_city(client: &Client, city: &str) -> Option<OpenMeteoGeocodeItem> {
+    let encoded_city = city.split_whitespace().collect::<Vec<_>>().join("+");
+    let geocode_url = format!(
+        "https://geocoding-api.open-meteo.com/v1/search?name={encoded_city}&count=1&language=en&format=json"
+    );
+
+    let geocode_response = client.get(geocode_url).send().await.ok()?;
+    if !geocode_response.status().is_success() {
+        return None;
+    }
+
+    let geocode_payload: OpenMeteoGeocodeResponse = geocode_response.json().await.ok()?;
+    geocode_payload.results?.into_iter().next()
+}
+
+async fn fetch_weather_for_requested_city(client: &Client, user_content: &str) -> Option<String> {
+    let city = extract_weather_city(user_content)?;
+    let mut candidates = vec![city.clone()];
+    if let Some(first_word) = city.split_whitespace().next() {
+        if first_word != city {
+            candidates.push(first_word.to_string());
+        }
+    }
+
+    let mut first = None;
+    for candidate in candidates {
+        if let Some(found) = geocode_city(client, &candidate).await {
+            first = Some(found);
+            break;
+        }
+    }
+    let first = first?;
+
+    let weather = fetch_weather_for_location(client, first.latitude, first.longitude).await?;
+    let location_label = format!(
+        "{}, {}, {}",
+        first.name,
+        first.admin1.unwrap_or_else(|| "Unknown region".to_string()),
+        first.country.unwrap_or_else(|| "Unknown country".to_string())
+    );
+    let activity_hint = build_activity_hint(weather.temperature, weather.weathercode);
+
+    Some(format!(
+        "Requested city weather: {location_label} (timezone: {}).\nCurrent weather: {:.1} C, wind {:.1} km/h, weather code {}.\nSuggested activity: {activity_hint}",
+        first.timezone.unwrap_or_else(|| "Unknown timezone".to_string()),
+        weather.temperature,
+        weather.windspeed,
+        weather.weathercode,
+    ))
 }
 
 async fn fetch_location_weather_context(client: &Client) -> Option<String> {
