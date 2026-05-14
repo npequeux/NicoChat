@@ -243,6 +243,64 @@ if (remoteEndpointInput) {
   });
 }
 
+// Accelerator toggle logic
+function updateAcceleratorToggles() {
+  const saved = JSON.parse(window.localStorage.getItem("nicochat-accelerators") || '["gpu","npu","remote"]');
+  [gpuToggle, npuToggle, remoteToggle].forEach((btn, i) => {
+    if (!btn) return;
+    const val = ["gpu","npu","remote"][i];
+    if (saved.includes(val)) {
+      btn.classList.add("active");
+    } else {
+      btn.classList.remove("active");
+    }
+    btn.addEventListener("click", () => {
+      btn.classList.toggle("active");
+      const acc = getAccelerators();
+      window.localStorage.setItem("nicochat-accelerators", JSON.stringify(acc));
+    });
+  });
+}
+updateAcceleratorToggles();
+
+// Show restart notice and handle restart button
+const ollamaRestartNotice = document.getElementById("ollamaRestartNotice");
+const restartOllamaBtn = document.getElementById("restartOllamaBtn");
+const restartOllamaStatus = document.getElementById("restartOllamaStatus");
+
+function showRestartNotice() {
+  if (ollamaRestartNotice) ollamaRestartNotice.style.display = "block";
+}
+function hideRestartNotice() {
+  if (ollamaRestartNotice) ollamaRestartNotice.style.display = "none";
+  if (restartOllamaStatus) restartOllamaStatus.textContent = "";
+}
+
+[gpuToggle, npuToggle, remoteToggle].forEach(btn => {
+  if (btn) {
+    btn.addEventListener("click", showRestartNotice);
+  }
+});
+
+if (restartOllamaBtn) {
+  restartOllamaBtn.addEventListener("click", async () => {
+    restartOllamaBtn.disabled = true;
+    restartOllamaStatus.textContent = "Restarting...";
+    try {
+      const resp = await fetch("/api/restart-ollama", { method: "POST" });
+      if (resp.ok) {
+        restartOllamaStatus.textContent = "Ollama restarted.";
+        setTimeout(hideRestartNotice, 2000);
+      } else {
+        restartOllamaStatus.textContent = "Failed to restart Ollama.";
+      }
+    } catch (e) {
+      restartOllamaStatus.textContent = "Error restarting Ollama.";
+    }
+    restartOllamaBtn.disabled = false;
+  });
+}
+
 refreshHealth().catch(() => {
   document.getElementById("backendValue").textContent = "Unavailable";
   document.getElementById("modeValue").textContent = "Unavailable";

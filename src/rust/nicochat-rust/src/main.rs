@@ -48,7 +48,21 @@ async fn main() {
         .route("/api/health", get(health))
         .route("/api/models", get(models))
         .route("/api/chat", post(chat))
+        .route("/api/restart-ollama", post(restart_ollama))
         .with_state(state);
+
+use std::process::Command;
+
+async fn restart_ollama() -> impl IntoResponse {
+    // Try to stop Ollama (ignore errors if not running)
+    let _ = Command::new("ollama").arg("stop").output();
+    // Start Ollama (in background)
+    let result = Command::new("ollama").arg("serve").spawn();
+    match result {
+        Ok(_) => (StatusCode::OK, "Ollama restarted".to_string()),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to restart Ollama: {e}")),
+    }
+}
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
@@ -77,7 +91,9 @@ struct ChatRequest {
     messages: Vec<ChatMessage>,
     model: Option<String>,
     speed_mode: Option<String>,
-    accelerator: Option<String>,
+    accelerator: Option<String>, // legacy single value
+    accelerators: Option<Vec<String>>, // new: array of enabled
+    internet_access: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -215,16 +231,23 @@ async fn chat(
     };
 
     // Accelerator: set env for new Ollama launches (not for running daemon)
-    if let Some(accel) = request.accelerator.as_deref() {
+    // Use first enabled accelerator from array, fallback to legacy single value
+    let chosen_accel = request
+        .accelerators
+        .as_ref()
+        .and_then(|v| v.first().cloned())
+        .or_else(|| request.accelerator.clone());
+    if let Some(accel) = chosen_accel {
         unsafe {
-            std::env::set_var("OLLAMA_ACCELERATOR", accel);
+            std::env::set_var("OLLAMA_ACCELERATOR", &accel);
         }
     }
 
+    let internet_access = request.internet_access.unwrap_or(true);
     let content = if state.use_mock {
         build_mock_reply(&request.messages)
     } else {
-        fetch_ollama_reply_tuned(&state, &request.messages, &model, temperature, top_p, top_k, repeat_penalty, max_tokens).await?
+        fetch_ollama_reply_tuned(&state, &request.messages, &model, temperature, top_p, top_k, repeat_penalty, max_tokens, internet_access).await?
     };
 
     Ok(Json(ChatReply {
@@ -244,7 +267,17 @@ async fn fetch_ollama_reply_tuned(
     top_k: u32,
     repeat_penalty: f32,
     max_tokens: u32,
+    internet_access: bool,
 ) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
+
+    // If internet access is disabled, block any user/system message that looks like a web request
+    if !internet_access {
+        let forbidden = messages.iter().any(|m| m.content.contains("http://") || m.content.contains("https://") || m.content.to_lowercase().contains("fetch ") || m.content.to_lowercase().contains("curl "));
+        if forbidden {
+            return Err((StatusCode::FORBIDDEN, Json(ErrorResponse { error: "Internet access is disabled for this conversation.".to_string() })));
+        }
+    }
+
     let normalized_messages = messages
         .iter()
         .map(|message| json!({ "role": message.role.to_lowercase(), "content": message.content }))

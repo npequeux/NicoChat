@@ -52,21 +52,16 @@
             </select>
           </div>
           <div class="accelerator-control">
-            <label for="acceleratorSelect">Accelerator:</label>
-            <select id="acceleratorSelect" title="Accelerator">
-              <option value="cpu" selected>CPU</option>
-              <option value="gpu">GPU</option>
-              <option value="npu">NPU</option>
-              <option value="remote">Remote (Internet)</option>
-            </select>
-            <input
-              id="remoteEndpointInput"
-              type="text"
-              placeholder="https://cloud.ollama.ai"
-              style="display:none; margin-left:0.5rem; width:220px;"
-              title="Remote Ollama endpoint (used if Remote is selected)"
-            />
-            </div>
+            <label>Accelerators:</label>
+            <button id="gpuToggle" class="toggle-btn active" type="button">GPU</button>
+            <button id="npuToggle" class="toggle-btn active" type="button">NPU</button>
+            <button id="remoteToggle" class="toggle-btn active" type="button">Remote</button>
+          </div>
+          <div id="ollamaRestartNotice" style="display:none; margin-top:0.5rem;">
+            <span style="color:#b45309; font-size:0.95em;">Restart required for accelerator change.</span>
+            <button id="restartOllamaBtn" class="toggle-btn" type="button" style="margin-left:1em;">Restart Ollama</button>
+            <span id="restartOllamaStatus" style="margin-left:0.7em; font-size:0.95em;"></span>
+          </div>
             <div class="internet-access-control" style="margin-top:0.7rem;">
               <label for="internetAccessToggle">Allow Internet Access:</label>
               <button id="internetAccessToggle" class="toggle-btn active" type="button">Enabled</button>
