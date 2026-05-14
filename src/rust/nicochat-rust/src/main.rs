@@ -470,6 +470,14 @@ fn is_unhelpful_reply(reply: &str) -> bool {
         || lower.contains("recommend checking")
         || lower.contains("check a reliable weather")
     || lower.contains("weather website or app")
+        || lower.contains("je n'ai pas d'informations actualisees")
+        || lower.contains("je n'ai pas d'informations actualisées")
+        || lower.contains("je n'ai pas d'information actualisee")
+        || lower.contains("je n'ai pas d'information actualisée")
+        || lower.contains("je vous recommande de consulter")
+        || lower.contains("consulter directement les sites officiels")
+        || lower.contains("rechercher les evenements locaux")
+        || lower.contains("rechercher les événements locaux")
 }
 
 fn build_grounded_answer_from_context(context: &str) -> String {
@@ -846,7 +854,57 @@ async fn fetch_search_snippet(client: &Client, query: &str) -> Option<String> {
             Some(format!("Search related context ({}): {}", heading, related))
         }
     } else {
+        fetch_jina_search_snippet(client, trimmed).await
+    }
+}
+
+async fn fetch_jina_search_snippet(client: &Client, query: &str) -> Option<String> {
+    let encoded_query = query.split_whitespace().collect::<Vec<_>>().join("+");
+    let url = format!(
+        "https://r.jina.ai/http://duckduckgo.com/?q={encoded_query}"
+    );
+
+    let response = client.get(url).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let text = response.text().await.ok()?;
+    let mut collected = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Keep lines likely to contain useful factual signals (dates/events/results).
+        let lower = trimmed.to_lowercase();
+        let has_signal = lower.contains("http")
+            || lower.contains("result")
+            || lower.contains("date")
+            || lower.contains("event")
+            || lower.contains("pride")
+            || lower.contains("brussels")
+            || lower.contains("202")
+            || lower.contains("agenda")
+            || lower.contains("official");
+
+        if has_signal {
+            collected.push(trimmed.to_string());
+        }
+
+        if collected.len() >= 8 {
+            break;
+        }
+    }
+
+    if collected.is_empty() {
         None
+    } else {
+        Some(format!(
+            "Search web context: {}",
+            collected.join(" | ")
+        ))
     }
 }
 
