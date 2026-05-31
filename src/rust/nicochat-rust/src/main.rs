@@ -264,6 +264,7 @@ struct OllamaMessage {
 #[derive(Debug, Deserialize)]
 struct OpenMeteoResponse {
     current_weather: Option<OpenMeteoCurrent>,
+    daily: Option<OpenMeteoDaily>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -271,6 +272,14 @@ struct OpenMeteoCurrent {
     temperature: f64,
     weathercode: i32,
     windspeed: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenMeteoDaily {
+    time: Vec<String>,
+    weathercode: Vec<i32>,
+    temperature_2m_max: Vec<f64>,
+    temperature_2m_min: Vec<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1064,9 +1073,10 @@ async fn try_fetch_retry_context(client: &Client, user_content: &str) -> Option<
         parts.push(base);
     }
 
-    let forced_query = format!("latest {}", user_content.trim());
-    if let Some(extra) = fetch_jina_search_snippet(client, &forced_query).await {
-        parts.push(format!("Retry web context: {}", extra));
+    for query in build_enriched_web_queries(user_content).into_iter().take(4) {
+        if let Some(extra) = fetch_jina_search_snippet(client, &query).await {
+            parts.push(format!("Retry web context ({query}): {}", extra));
+        }
     }
 
     if parts.is_empty() {
@@ -1085,6 +1095,12 @@ async fn try_fetch_relevant_context(client: &Client, user_content: &str) -> Opti
         } else if let Some(local_context) = fetch_location_weather_context(client).await {
             parts.push(local_context);
         }
+
+        if is_future_weather_query(user_content) {
+            if let Some(forecast) = fetch_future_weather_context(client, user_content, 1).await {
+                parts.push(forecast);
+            }
+        }
     } else if needs_location_context(user_content) {
         if let Some(local_context) = fetch_location_weather_context(client).await {
             parts.push(local_context);
@@ -1097,13 +1113,15 @@ async fn try_fetch_relevant_context(client: &Client, user_content: &str) -> Opti
         }
     }
 
-    if let Some(search_context) = fetch_search_snippet(client, user_content).await {
-        parts.push(search_context);
-    }
+    for query in build_enriched_web_queries(user_content).into_iter().take(4) {
+        if let Some(search_context) = fetch_search_snippet(client, &query).await {
+            parts.push(format!("Search context ({query}): {search_context}"));
+        }
 
-    // Always try to add a live web-search snapshot so each request has internet signals.
-    if let Some(live_search_context) = fetch_jina_search_snippet(client, user_content).await {
-        parts.push(format!("Live web context: {}", live_search_context));
+        // Always try to add a live web-search snapshot so each request has internet signals.
+        if let Some(live_search_context) = fetch_jina_search_snippet(client, &query).await {
+            parts.push(format!("Live web context ({query}): {}", live_search_context));
+        }
     }
 
     if parts.is_empty() {
@@ -1125,6 +1143,65 @@ fn needs_location_context(text: &str) -> bool {
         || lower.contains("quoi faire")
         || lower.contains("what to do")
         || lower.contains("activities")
+}
+
+fn is_future_weather_query(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("tomorrow")
+        || lower.contains("demain")
+        || lower.contains("next day")
+        || lower.contains("apres-demain")
+        || lower.contains("après-demain")
+}
+
+fn build_enriched_web_queries(user_content: &str) -> Vec<String> {
+    let trimmed = user_content.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let mut queries = vec![trimmed.to_string()];
+    queries.push(format!("latest {trimmed}"));
+    queries.push(format!("{trimmed} facts"));
+    queries.push(format!("{trimmed} official source"));
+
+    if is_weather_query(trimmed) {
+        let city = extract_weather_city(trimmed).unwrap_or_else(|| "Bruxelles".to_string());
+        if is_future_weather_query(trimmed) {
+            queries.push(format!("weather tomorrow in {city}"));
+            queries.push(format!("meteo demain {city}"));
+            queries.push(format!("forecast tomorrow {city}"));
+        } else {
+            queries.push(format!("current weather in {city}"));
+            queries.push(format!("meteo actuelle {city}"));
+        }
+    } else if is_factoid_query(trimmed) {
+        queries.push(format!("{trimmed} wikipedia"));
+        queries.push(format!("{trimmed} encyclopedic summary"));
+    }
+
+    let mut deduped = Vec::new();
+    for query in queries {
+        let normalized = query.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !normalized.is_empty() && !deduped.contains(&normalized) {
+            deduped.push(normalized);
+        }
+    }
+
+    deduped
+}
+
+fn is_factoid_query(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("who is")
+        || lower.contains("what is")
+        || lower.contains("when")
+        || lower.contains("where")
+        || lower.contains("qui est")
+        || lower.contains("c'est quoi")
+        || lower.contains("qu'est ce que")
+        || lower.contains("quel est")
+        || lower.contains("histoire")
 }
 
 fn extract_first_url(text: &str) -> Option<&str> {
@@ -1428,6 +1505,81 @@ async fn fetch_weather_for_location(
     payload.current_weather
 }
 
+async fn fetch_weather_forecast_for_location(
+    client: &Client,
+    latitude: f64,
+    longitude: f64,
+) -> Option<OpenMeteoDaily> {
+    let url = format!(
+        "https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=auto"
+    );
+    let response = client.get(url).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let payload: OpenMeteoResponse = response.json().await.ok()?;
+    payload.daily
+}
+
+async fn fetch_future_weather_context(
+    client: &Client,
+    user_content: &str,
+    day_offset: usize,
+) -> Option<String> {
+    let city = extract_weather_city(user_content).unwrap_or_else(|| "Bruxelles".to_string());
+
+    let mut candidates = vec![city.clone()];
+    if city.eq_ignore_ascii_case("bruxelles") {
+        candidates.push("Brussels".to_string());
+    }
+
+    let mut resolved = None;
+    for candidate in candidates {
+        if let Some(found) = geocode_city(client, &candidate).await {
+            resolved = Some(found);
+            break;
+        }
+    }
+
+    let location = resolved.unwrap_or(OpenMeteoGeocodeItem {
+        name: "Bruxelles".to_string(),
+        country: Some("Belgique".to_string()),
+        admin1: Some("Bruxelles-Capitale".to_string()),
+        latitude: 50.8503,
+        longitude: 4.3517,
+        timezone: Some("Europe/Brussels".to_string()),
+    });
+
+    let daily = fetch_weather_forecast_for_location(client, location.latitude, location.longitude).await?;
+    if daily.time.len() <= day_offset
+        || daily.weathercode.len() <= day_offset
+        || daily.temperature_2m_max.len() <= day_offset
+        || daily.temperature_2m_min.len() <= day_offset
+    {
+        return None;
+    }
+
+    let date = &daily.time[day_offset];
+    let weather_code = daily.weathercode[day_offset];
+    let temp_max = daily.temperature_2m_max[day_offset];
+    let temp_min = daily.temperature_2m_min[day_offset];
+    let hint = build_activity_hint((temp_max + temp_min) / 2.0, weather_code);
+
+    Some(format!(
+        "Forecast (J+{day_offset}) for {}, {}, {} (timezone: {}): date {}, min {:.1} C, max {:.1} C, weather code {}. Suggested activity: {}",
+        location.name,
+        location.admin1.unwrap_or_else(|| "Unknown region".to_string()),
+        location.country.unwrap_or_else(|| "Unknown country".to_string()),
+        location.timezone.unwrap_or_else(|| "Unknown timezone".to_string()),
+        date,
+        temp_min,
+        temp_max,
+        weather_code,
+        hint,
+    ))
+}
+
 fn build_activity_hint(temperature: f64, weather_code: i32) -> &'static str {
     if weather_code >= 60 {
         "Pluie probable: privilegie une activite en interieur (musee, cafe, cinema)."
@@ -1531,25 +1683,11 @@ async fn fetch_jina_search_snippet(client: &Client, query: &str) -> Option<Strin
     let mut collected = Vec::new();
     for line in text.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || is_low_signal_web_line(trimmed) {
             continue;
         }
 
-        // Keep lines likely to contain useful factual signals (dates/events/results).
-        let lower = trimmed.to_lowercase();
-        let has_signal = lower.contains("http")
-            || lower.contains("result")
-            || lower.contains("date")
-            || lower.contains("event")
-            || lower.contains("pride")
-            || lower.contains("brussels")
-            || lower.contains("202")
-            || lower.contains("agenda")
-            || lower.contains("official");
-
-        if has_signal {
-            collected.push(trimmed.to_string());
-        }
+        collected.push(trimmed.to_string());
 
         if collected.len() >= 8 {
             break;
@@ -1564,6 +1702,24 @@ async fn fetch_jina_search_snippet(client: &Client, query: &str) -> Option<Strin
             collected.join(" | ")
         ))
     }
+}
+
+fn is_low_signal_web_line(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    if lower.len() < 20 {
+        return true;
+    }
+
+    lower.starts_with("![")
+        || lower.starts_with("[")
+        || lower.starts_with("menu")
+        || lower.starts_with("navigation")
+        || lower.starts_with("privacy")
+        || lower.starts_with("terms")
+        || lower.starts_with("sign in")
+        || lower.starts_with("log in")
+        || lower.starts_with("all regions")
+        || lower.starts_with("search only")
 }
 
 fn extract_related_topics(payload: &serde_json::Value) -> Option<String> {
@@ -1784,7 +1940,10 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_image_search_candidates, extract_weather_city};
+    use super::{
+        build_enriched_web_queries, build_image_search_candidates, extract_weather_city,
+        is_factoid_query, is_future_weather_query,
+    };
 
     #[test]
     fn test_extract_weather_city_no_city_provided() {
@@ -1834,5 +1993,41 @@ mod tests {
                 .iter()
                 .any(|q| q.to_lowercase().contains("portrait photo portrait"))
         );
+    }
+
+    #[test]
+    fn test_future_weather_detection() {
+        assert!(is_future_weather_query("meteo demain a Bruxelles"));
+        assert!(is_future_weather_query("weather tomorrow in Brussels"));
+        assert!(!is_future_weather_query("meteo actuelle"));
+    }
+
+    #[test]
+    fn test_enriched_queries_for_tomorrow_weather() {
+        let queries = build_enriched_web_queries("meteo demain a Bruxelles");
+
+        assert!(queries.iter().any(|q| q == "meteo demain a Bruxelles"));
+        assert!(queries
+            .iter()
+            .any(|q| q.to_lowercase().contains("tomorrow") || q.to_lowercase().contains("demain")));
+        assert!(queries
+            .iter()
+            .any(|q| q.to_lowercase().contains("forecast") || q.to_lowercase().contains("latest")));
+    }
+
+    #[test]
+    fn test_enriched_queries_for_general_question() {
+        let queries = build_enriched_web_queries("Qui est Ada Lovelace ?");
+
+        assert!(queries.iter().any(|q| q == "Qui est Ada Lovelace ?"));
+        assert!(queries.iter().any(|q| q.to_lowercase().contains("wikipedia")));
+        assert!(queries.iter().any(|q| q.to_lowercase().contains("official source")));
+    }
+
+    #[test]
+    fn test_factoid_detection() {
+        assert!(is_factoid_query("who is Alan Turing"));
+        assert!(is_factoid_query("Qui est Marie Curie ?"));
+        assert!(!is_factoid_query("hello"));
     }
 }
